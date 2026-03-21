@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mixxx-multitool"
-version = "0.1.0"
-description = "Safe CLI foundation for Mixxx database scanning, auditing, cleanup, organization, and scoring"
+name = "multidj"
+version = "0.2.0"
+description = "MultiDJ — software-agnostic DJ music library manager with SQLite, LLM integration, and multi-app sync"
 readme = "README.md"
 requires-python = ">=3.9"
 

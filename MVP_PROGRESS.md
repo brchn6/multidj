@@ -1,4 +1,4 @@
-# MVP Progress — mixxx_multitool
+# MVP Progress — multidj
 
 **Stack:** Python 3.9+, SQLite (stdlib only for core), librosa + mutagen (optional, key analysis)
 **Entry point:** `python -m mixxx_tool` or `mixxx-tool` (installed via pip)

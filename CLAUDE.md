@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`mixxx_multitool` is a Python 3.9+ CLI for batch tag management on Mixxx music libraries. It operates on a SQLite database (`~/.mixxx/mixxxdb.sqlite`) and is designed for agent use: all write commands are **dry-run by default**, automatic backups are created before any writes, and JSON output is available for machine consumption.
+`MultiDJ` (package: `multidj`) is a Python 3.9+ CLI for DJ music library management. It is evolving from a Mixxx-specific tool into a software-agnostic library manager with its own SQLite DB (`~/.multidj/library.sqlite`) that syncs to DJ software. Currently still running against the Mixxx DB (`~/.mixxx/mixxxdb.sqlite`) — see `docs/superpowers/specs/2026-03-21-multidj-design.md` for the migration plan. All write commands are **dry-run by default**, automatic backups are created before any writes, and JSON output is available for machine consumption.
 
 ## Installation and Running
 
