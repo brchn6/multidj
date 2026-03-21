@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+
+# Mixxx DB backups (keep out of repo)
+*.sqlite
+*.sqlite.bak
+
+# OS
+.DS_Store
