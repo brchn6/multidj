@@ -10,11 +10,12 @@ readme = "README.md"
 requires-python = ">=3.9"
 
 [project.scripts]
-mixxx-tool = "mixxx_tool.cli:main"
+multidj = "multidj.cli:main"
+mixxx-tool = "multidj.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mixxx_tool*"]
+include = ["multidj*"]

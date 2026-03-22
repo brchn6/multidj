@@ -85,10 +85,10 @@ def _format_enrich_language(data: dict) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mixxx-tool",
-        description="Mixxx database multitool — batch tag management for large libraries.",
+        prog="multidj",
+        description="MultiDJ — DJ music library manager with SQLite, LLM integration, and multi-app sync.",
     )
-    parser.add_argument("--db", help="Path to Mixxx SQLite database")
+    parser.add_argument("--db", help="Path to MultiDJ SQLite database (default: ~/.multidj/library.sqlite)")
     parser.add_argument("--json", action="store_true", help="Emit JSON output")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
