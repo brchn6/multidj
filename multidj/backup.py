@@ -8,7 +8,7 @@ from pathlib import Path
 from .db import resolve_db_path, ensure_db_exists
 
 
-DEFAULT_BACKUP_DIR = Path("~/.mixxx/backups").expanduser()
+DEFAULT_BACKUP_DIR = Path("~/.multidj/backups").expanduser()
 
 
 @dataclass

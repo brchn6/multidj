@@ -55,3 +55,7 @@ DUPLICATE_SUFFIX_RE = re.compile(r"\.\d+$")
 # Auto-crate prefixes for rebuild operations (superset of AUTO_CRATE_PREFIXES).
 # Matches Genre:, BPM:, Lang: prefixes (case-insensitive).
 REBUILD_CRATE_RE = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s)", re.IGNORECASE)
+
+# Adapters registered in the sync_state table.
+# import directory inserts dirty=1 rows for every adapter in this list.
+KNOWN_ADAPTERS: tuple[str, ...] = ("mixxx",)

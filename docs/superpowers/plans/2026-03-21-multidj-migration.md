@@ -250,17 +250,14 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
             continue
         sql = script.read_text()
         try:
-            # Execute each statement individually inside an explicit transaction.
-            # executescript() auto-commits (DDL limitation of SQLite), so we
-            # split on ";" and use conn.execute() to keep everything in one
-            # transaction that we can roll back on failure.
-            conn.execute("BEGIN")
-            for stmt in (s.strip() for s in sql.split(";") if s.strip()):
-                conn.execute(stmt)
+            # executescript() handles multi-statement SQL including triggers
+            # with semicolons inside BEGIN...END bodies. It auto-commits, but
+            # SQLite DDL cannot be rolled back anyway. Protection: schema_version
+            # is only updated if the script succeeds without raising.
+            conn.executescript(sql)
             conn.execute("UPDATE schema_version SET version = ?", (n,))
             conn.commit()
         except Exception as exc:
-            conn.rollback()
             raise RuntimeError(f"Migration {script.name} failed: {exc}") from exc
 
 
