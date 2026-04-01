@@ -5,11 +5,13 @@ import sys
 from typing import Any
 
 from . import __version__
+from .adapters.mixxx import MixxxAdapter
 from .analyze import analyze_key
 from .audit import audit_genres, audit_metadata
 from .backup import create_backup
 from .clean import clean_genres, clean_text
 from .crates import audit_crates, delete_crates, hide_crates, show_crates, rebuild_crates
+from .db import resolve_db_path
 from .dedupe import dedupe
 from .enrich import enrich_language
 from .parse import parse_library
@@ -188,6 +190,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Soft-delete duplicates (sets mixxx_deleted=1, reversible)")
     p.add_argument("--no-backup", action="store_true", help="Skip backup before apply")
 
+    # ── import ────────────────────────────────────────────────────────────────
+    import_p = sub.add_parser("import", help="Import tracks from external sources")
+    import_sub = import_p.add_subparsers(dest="import_target", required=True)
+    p = import_sub.add_parser("mixxx", help="One-time import from Mixxx DB into MultiDJ library")
+    p.add_argument("--mixxx-db", help="Path to Mixxx DB (default: ~/.mixxx/mixxxdb.sqlite)")
+    p.add_argument("--apply", action="store_true", help="Write to MultiDJ DB (default: dry-run)")
+    p.add_argument("--no-backup", action="store_true", help="Skip backup before import")
+
     return parser
 
 
@@ -284,6 +294,16 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "dedupe":
         result = dedupe(args.db, by=args.by, apply=args.apply, backup=not args.no_backup)
+
+    elif args.command == "import":
+        if args.import_target == "mixxx":
+            adapter = MixxxAdapter(mixxx_db_path=args.mixxx_db)
+            if args.apply and not args.no_backup:
+                create_backup(args.db)
+            result = adapter.import_all(
+                multidj_db_path=resolve_db_path(args.db),
+                apply=args.apply,
+            )
 
     else:
         parser.error("Unknown command.")
