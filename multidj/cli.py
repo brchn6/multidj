@@ -198,6 +198,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--apply", action="store_true", help="Write to MultiDJ DB (default: dry-run)")
     p.add_argument("--no-backup", action="store_true", help="Skip backup before import")
 
+    # ── sync ─────────────────────────────────────────────────────────────────
+    sync_p = sub.add_parser("sync", help="Push dirty tracks to DJ software")
+    sync_sub = sync_p.add_subparsers(dest="sync_target", required=True)
+    p = sync_sub.add_parser("mixxx", help="Push dirty tracks to Mixxx")
+    p.add_argument("--mixxx-db", help="Path to Mixxx DB (default: ~/.mixxx/mixxxdb.sqlite)")
+    p.add_argument("--apply", action="store_true", help="Write to Mixxx (default: dry-run)")
+    p.add_argument("--no-backup", action="store_true", help="Skip backup of Mixxx DB")
+
     return parser
 
 
@@ -301,6 +309,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.apply and not args.no_backup:
                 create_backup(args.db)
             result = adapter.import_all(
+                multidj_db_path=resolve_db_path(args.db),
+                apply=args.apply,
+            )
+
+    elif args.command == "sync":
+        if args.sync_target == "mixxx":
+            adapter = MixxxAdapter(mixxx_db_path=args.mixxx_db)
+            result = adapter.full_sync(
                 multidj_db_path=resolve_db_path(args.db),
                 apply=args.apply,
             )
