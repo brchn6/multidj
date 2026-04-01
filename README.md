@@ -1,105 +1,146 @@
-# Mixxx Multitool
+# MultiDJ
 
-A safe, modular CLI for batch tag management on large Mixxx libraries.
-Designed for agent-operated workflows: JSON output, dry-run defaults, per-track error isolation, and automatic backups before every write.
+A software-agnostic DJ music library manager. Maintains its own SQLite database as the source of truth for track metadata, syncs to DJ software (Mixxx first; Rekordbox and Serato as future adapters).
+
+Designed for agent-operated workflows: JSON output, dry-run defaults, per-track error isolation, and automatic backups before every write. Eventually exposed as an MCP server so AI agents can drive your full library pipeline natively.
+
+## Install
+
+```bash
+pip install -e .
+multidj --help
+```
+
+## Quick start
+
+```bash
+# One-time: import your Mixxx library into MultiDJ
+multidj import mixxx            # dry-run: preview what would be imported
+multidj import mixxx --apply    # write to ~/.multidj/library.sqlite
+
+# Library health
+multidj scan
+multidj scan --json
+
+# Push changes back to Mixxx after editing metadata in MultiDJ
+multidj sync mixxx              # dry-run: show dirty tracks
+multidj sync mixxx --apply      # push to Mixxx
+```
 
 ## Commands
 
+### Import & sync
+
 ```bash
-python -m mixxx_tool --help
+multidj import mixxx [--mixxx-db PATH] [--apply] [--no-backup]
+multidj sync mixxx   [--mixxx-db PATH] [--apply] [--no-backup]
+```
 
-# Library summary (active tracks only — excludes soft-deleted)
-python -m mixxx_tool scan
-python -m mixxx_tool scan --json
+### Library operations
 
-# Audit
-python -m mixxx_tool audit genres                # genre distribution, collisions, suspicious values
-python -m mixxx_tool audit genres --top 50
-python -m mixxx_tool audit metadata --json       # field coverage percentages
+```bash
+multidj scan                     # track counts, metadata coverage, crate count
+multidj scan --verbose           # also list all DB tables
 
-# Backup
-python -m mixxx_tool backup
-python -m mixxx_tool backup --backup-dir /tmp/backups
+multidj audit genres             # distribution, case collisions, uninformative
+multidj audit genres --top 50
+multidj audit metadata           # field coverage percentages
 
-# Clean genres (case variants → canonical, uninformative → NULL, whitespace)
-python -m mixxx_tool clean genres                # dry-run
-python -m mixxx_tool clean genres --apply        # write changes (backup created first)
-python -m mixxx_tool clean genres --limit 50     # cap changes
-python -m mixxx_tool clean genres --json         # structured output
+multidj backup
+multidj backup --backup-dir /tmp/backups
+```
 
-# Clean text (strip / collapse whitespace in artist, title, album)
-python -m mixxx_tool clean text
-python -m mixxx_tool clean text --apply
+### Clean & normalize
 
-# Parse artist/title from filenames
-python -m mixxx_tool parse                           # dry-run: propose changes
-python -m mixxx_tool parse --apply                   # write to DB (backup created first)
-python -m mixxx_tool parse --min-confidence high     # only high-confidence changes
-python -m mixxx_tool parse --force                   # overwrite already-tagged fields
-python -m mixxx_tool parse --limit 20 --json         # structured output
+```bash
+multidj clean genres             # dry-run: case variants, uninformative → NULL, whitespace
+multidj clean genres --apply
+multidj clean genres --limit 50
 
-# Enrich tracks with metadata from external signals
-python -m mixxx_tool enrich language                 # detect Hebrew tracks (Unicode range check)
-python -m mixxx_tool enrich language --json
+multidj clean text               # dry-run: strip/collapse whitespace in artist/title/album
+multidj clean text --apply
+```
 
-# Detect and tag musical key (requires: pip install librosa mutagen)
-python -m mixxx_tool analyze key --limit 5              # dry-run, list candidates
-python -m mixxx_tool analyze key --limit 5 --apply      # detect + sync to DB
-python -m mixxx_tool analyze key --apply --write-tags   # also write audio file tags
-python -m mixxx_tool analyze key --apply --no-sync-db   # tags only, skip DB
-python -m mixxx_tool analyze key --apply --force        # overwrite existing keys
+### Enrich & analyze
 
-# Crate management
-# Types: "catch-all" (New Crate), "auto" (Genre: X / BPM: X), "hand-curated" (everything else)
-# Hand-curated and catch-all crates are always protected by default.
-python -m mixxx_tool crates audit --summary              # counts only
-python -m mixxx_tool crates audit                        # full crate lists
-python -m mixxx_tool crates audit --min-tracks 10        # custom threshold
+```bash
+multidj enrich language          # detect Hebrew tracks (Unicode range check)
 
-python -m mixxx_tool crates hide                         # dry-run: hide auto crates <5 tracks
-python -m mixxx_tool crates hide --apply                 # hide them (sets show=0, reversible)
-python -m mixxx_tool crates hide --include-hand-curated  # also hide hand-curated small crates
+# Key detection requires: pip install librosa mutagen
+multidj analyze key --limit 5   # dry-run: list candidates
+multidj analyze key --apply      # detect + write to DB
+multidj analyze key --apply --write-tags   # also write audio file tags
+multidj analyze key --apply --force        # overwrite existing keys
+```
 
-python -m mixxx_tool crates show                         # dry-run: restore all hidden crates
-python -m mixxx_tool crates show --apply --min-tracks 5  # restore only crates now at >=5 tracks
+### Parse filenames
 
-python -m mixxx_tool crates delete                       # dry-run: permanently delete auto crates <5 tracks
-python -m mixxx_tool crates delete --apply               # delete (removes crate + track assignments)
+```bash
+multidj parse                    # dry-run: propose artist/title/remixer from filenames
+multidj parse --apply
+multidj parse --min-confidence high
+multidj parse --force            # overwrite already-tagged fields
+```
 
-python -m mixxx_tool crates rebuild                      # dry-run: preview Genre: + Lang: crates to create
-python -m mixxx_tool crates rebuild --apply              # delete old auto-crates, create fresh ones
-python -m mixxx_tool crates rebuild --min-tracks 10      # only create crates with >=10 tracks
+### Crates
 
-# Find and remove duplicate tracks
-# Keeper chosen by: most played → highest rated → largest file
-# --apply sets mixxx_deleted=1 (soft delete, reversible)
-python -m mixxx_tool dedupe                    # dry-run: full groups with keeper/duplicate detail
-python -m mixxx_tool dedupe --json
-python -m mixxx_tool dedupe --by artist-title  # match on artist+title only
-python -m mixxx_tool dedupe --by filesize      # match on filesize+duration only
-python -m mixxx_tool dedupe --apply            # remove duplicates
+```bash
+# Crate tiers: "catch-all" (New Crate) | "auto" (Genre:/Lang: prefix) | "hand-curated"
+# Hand-curated and catch-all are always protected by default.
+
+multidj crates audit             # inventory and classification
+multidj crates audit --summary  # counts only
+multidj crates audit --min-tracks 10
+
+multidj crates hide              # dry-run: hide auto crates below threshold
+multidj crates hide --apply      # sets show=0 (reversible)
+multidj crates hide --include-hand-curated
+
+multidj crates show              # dry-run: restore hidden crates
+multidj crates show --apply --min-tracks 5
+
+multidj crates delete            # dry-run: permanently delete auto crates
+multidj crates delete --apply
+
+multidj crates rebuild           # dry-run: preview Genre:/Lang: crates
+multidj crates rebuild --apply   # delete old auto-crates, recreate from current data
+multidj crates rebuild --min-tracks 10
+```
+
+### Deduplicate
+
+```bash
+# Keeper: most played → highest rated → largest file
+# --apply uses soft-delete (deleted=1, reversible)
+
+multidj dedupe                   # dry-run: show groups with keeper/duplicate detail
+multidj dedupe --by artist-title
+multidj dedupe --by filesize
+multidj dedupe --apply
 ```
 
 ## Global flags
 
 | Flag | Effect |
 |------|--------|
-| `--json` | Structured JSON output (works before or after subcommand) |
-| `--db /path` | Override database path |
+| `--json` | Structured JSON output (accepted anywhere in the command line) |
+| `--db PATH` | Override MultiDJ DB path (default: `~/.multidj/library.sqlite`) |
+| `--version` | Show version |
+
+Override DB path with env var: `MULTIDJ_DB_PATH=/path/to/library.sqlite`
 
 ## Safety model
 
-- All commands are **dry-run by default** — nothing is written without `--apply`
-- Write operations create a timestamped backup in `~/.mixxx/backups/` first (skip with `--no-backup`)
-- Scan, audit, and `dedupe` (without `--apply`) are always read-only
-- `dedupe --apply` and `crates delete --apply` use soft-delete — data is recoverable
-- Per-track error isolation: one bad file does not abort the batch
-- `analyze key` dry-run lists candidates without loading audio (no deps needed)
-- All stats exclude soft-deleted tracks (`mixxx_deleted = 1`)
+- All commands are **dry-run by default** — nothing written without `--apply`
+- Automatic timestamped backup before every write (skip with `--no-backup`)
+- `dedupe --apply` and `crates delete --apply` use **soft-delete** (`deleted=1`) — recoverable
+- Per-track error isolation in `analyze key` — one bad audio file never aborts the batch
+- All stats exclude soft-deleted tracks
+- `sync mixxx --apply` backs up the Mixxx DB before writing
 
 ## Dependencies
 
-Core commands: **Python 3.9+ stdlib only**
+Core: **Python 3.9+ stdlib only**
 
 Key analysis (`analyze key --apply`):
 ```bash
@@ -109,25 +150,57 @@ pip install librosa mutagen
 ## Project layout
 
 ```
-mixxx_tool/
-├── constants.py   — shared UNINFORMATIVE_GENRES, regex patterns, crate classifiers
-├── db.py          — connect(), resolve_db_path(), table_exists()
-├── backup.py      — create_backup()
-├── models.py      — LibrarySummary
-├── utils.py       — emit() for JSON / human output
-├── scan.py        — scan_library()
-├── audit.py       — audit_genres(), audit_metadata()
-├── clean.py       — clean_genres(), clean_text()
-├── analyze.py     — analyze_key(), detect_key(), _write_tag()
-├── parse.py       — parse_filename(), parse_library()
-├── enrich.py      — is_hebrew(), enrich_language()
-├── crates.py      — audit_crates(), hide_crates(), show_crates(), delete_crates(), rebuild_crates()
-├── dedupe.py      — dedupe()
-└── cli.py         — argument parsing and command routing
+multidj/
+├── cli.py              — argparse entry point, global flag hoisting, subcommand dispatch
+├── db.py               — connect(), resolve_db_path(), migration runner
+├── backup.py           — create_backup() — timestamped copies to ~/.multidj/backups/
+├── models.py           — LibrarySummary dataclass
+├── utils.py            — emit() for JSON / human output
+├── constants.py        — UNINFORMATIVE_GENRES, AUTO_CRATE_PREFIXES, regex patterns, KNOWN_ADAPTERS
+├── scan.py             — scan_library()
+├── audit.py            — audit_genres(), audit_metadata()
+├── clean.py            — clean_genres(), clean_text()
+├── analyze.py          — analyze_key(), detect_key()
+├── parse.py            — parse_filename(), parse_library()
+├── enrich.py           — is_hebrew(), enrich_language()
+├── crates.py           — audit/hide/show/delete/rebuild_crates()
+├── dedupe.py           — dedupe()
+├── adapters/
+│   ├── base.py         — SyncAdapter ABC
+│   └── mixxx.py        — MixxxAdapter: import_all(), push_track(), full_sync()
+└── migrations/
+    └── 001_initial.sql — MultiDJ schema v1
+
+tests/
+├── conftest.py         — shared pytest fixtures
+├── fixtures/
+│   ├── data.py         — canonical TRACKS/CRATES test data (10 tracks)
+│   ├── mixxx_factory.py
+│   └── multidj_factory.py
+├── test_import.py
+├── test_sync.py
+├── test_scan.py
+├── test_audit.py
+├── test_clean.py
+├── test_parse.py
+├── test_enrich.py
+├── test_crates.py
+├── test_dedupe.py
+├── test_analyze.py
+└── test_safety.py      — cross-cutting dry-run/apply/backup invariants
 ```
 
-## Default DB location
+## Run tests
 
-`~/.mixxx/mixxxdb.sqlite`
+```bash
+pytest tests/ -v
+pytest tests/test_import.py -v   # single module
+```
 
-Override with `--db /path/to/mixxxdb.sqlite` or `MIXXX_DB_PATH=/path/to/mixxxdb.sqlite`.
+## DB locations
+
+| Path | Purpose |
+|------|---------|
+| `~/.multidj/library.sqlite` | MultiDJ DB (source of truth) |
+| `~/.mixxx/mixxxdb.sqlite` | Mixxx DB (read on import, written on sync) |
+| `~/.multidj/backups/` | Timestamped backups |

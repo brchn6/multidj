@@ -4,14 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`MultiDJ` (package: `multidj`) is a Python 3.9+ CLI for DJ music library management. It is evolving from a Mixxx-specific tool into a software-agnostic library manager with its own SQLite DB (`~/.multidj/library.sqlite`) that syncs to DJ software. See `docs/superpowers/specs/2026-03-21-multidj-design.md` for the migration plan. All write commands are **dry-run by default**, automatic backups are created before any writes, and JSON output is available for machine consumption.
+`MultiDJ` (package: `multidj`) is a Python 3.9+ CLI for DJ music library management. It maintains its own SQLite DB (`~/.multidj/library.sqlite`) as the source of truth and syncs to DJ software (Mixxx first; Rekordbox/Serato as future adapters). All write commands are **dry-run by default**, automatic backups are created before any writes, and JSON output is available for machine consumption. Eventually exposed as an MCP server for agent-native access.
+
+Migration from Mixxx-only tool is **complete** (Phases 0–4). All commands now operate on the MultiDJ DB.
 
 ## Installation and Running
 
 ```bash
 pip install -e .
-multidj <command>        # primary entry point
-mixxx-tool <command>     # legacy alias (same binary)
+multidj import mixxx --apply   # one-time: populate MultiDJ DB from Mixxx
+multidj <command>              # primary entry point
+mixxx-tool <command>           # legacy alias (same binary)
 ```
 
 Override the DB path: `--db <path>` flag or `MULTIDJ_DB_PATH` environment variable.
@@ -22,6 +25,8 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 
 | Command | Description |
 |---|---|
+| `import mixxx` | One-time pull from `~/.mixxx/mixxxdb.sqlite` into MultiDJ DB |
+| `sync mixxx` | Push dirty tracks back to Mixxx after editing in MultiDJ |
 | `scan` | Library statistics (track counts, metadata coverage) |
 | `backup` | Manual backup |
 | `parse` | Propose artist/title/remixer from filenames; `--apply` to write, `--min-confidence`, `--force` |
@@ -48,9 +53,11 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 2. **`db.py`** — `connect(db_path, readonly=True)` context manager; auto-applies SQL migrations on write connections; `resolve_db_path()`, `ensure_db_exists()`, `ensure_not_empty()`, `table_exists()`
 3. **`backup.py`** — creates timestamped DB copies before every write; returns `BackupResult`
 4. **`utils.py`** — `emit(data, json_mode)` for unified JSON/human output
-5. **`constants.py`** — uninformative genre list, crate classifier prefixes, shared regex patterns
+5. **`constants.py`** — uninformative genre list, crate classifier prefixes, shared regex patterns, `KNOWN_ADAPTERS`
 6. **`models.py`** — `LibrarySummary` dataclass
-7. **Command modules** (`scan`, `audit`, `clean`, `analyze`, `parse`, `enrich`, `crates`, `dedupe`) — pure business logic, read-only unless `--apply` is passed
+7. **`adapters/base.py`** — `SyncAdapter` ABC (`import_all`, `push_track`, `full_sync`)
+8. **`adapters/mixxx.py`** — `MixxxAdapter`: reads Mixxx DB on import, writes back on sync; `_detect_key_column()` uses `PRAGMA table_info(keys)` defensively
+9. **Command modules** (`scan`, `audit`, `clean`, `analyze`, `parse`, `enrich`, `crates`, `dedupe`) — pure business logic, read-only unless `--apply` is passed
 
 **Migration system:** SQL files in `multidj/migrations/NNN_name.sql` are auto-applied in numeric order when `connect(readonly=False)` is called. Schema version tracked in `schema_version` table.
 
@@ -70,4 +77,11 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 
 ## Tests and Linting
 
-No automated tests exist (intentionally deferred; planned as `pytest` with a fixture DB). No linting config is set up. The codebase follows PEP 8 conventions with type hints throughout.
+```bash
+pytest tests/ -v           # full suite (92 tests)
+pytest tests/test_scan.py  # single module
+```
+
+Fixture DB (10 tracks) is in `tests/fixtures/data.py` — this is the ground truth for all test assertions. `make_mixxx_db()` and `make_multidj_db()` in `tests/fixtures/` build fresh SQLite files from it. Each test gets an isolated DB via `tmp_path`.
+
+No linting config. PEP 8 conventions with type hints throughout.
