@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from .db import connect, table_exists
+from .db import connect, table_exists, ensure_not_empty
 from .models import LibrarySummary
 
 
@@ -12,15 +12,16 @@ def _count(conn: sqlite3.Connection, query: str) -> int:
     return int(row[0]) if row else 0
 
 
-_ACTIVE = "mixxx_deleted = 0"
+_ACTIVE = "deleted = 0"
 
 
 def scan_library(db_path: str | None = None, verbose: bool = False) -> dict[str, Any]:
     with connect(db_path, readonly=True) as conn:
-        if not table_exists(conn, "library"):
-            raise RuntimeError("Expected Mixxx table 'library' was not found.")
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
 
-        total_tracks = _count(conn, f"SELECT COUNT(*) FROM library WHERE {_ACTIVE}")
+        total_tracks = _count(conn, f"SELECT COUNT(*) FROM tracks WHERE {_ACTIVE}")
         total_crates = 0
         if table_exists(conn, "crates"):
             total_crates = _count(conn, "SELECT COUNT(*) FROM crates")
@@ -30,19 +31,19 @@ def scan_library(db_path: str | None = None, verbose: bool = False) -> dict[str,
             total_crates=total_crates,
             tracks_with_genre=_count(
                 conn,
-                f"SELECT COUNT(*) FROM library WHERE {_ACTIVE} AND genre IS NOT NULL AND TRIM(genre) != ''"
+                f"SELECT COUNT(*) FROM tracks WHERE {_ACTIVE} AND genre IS NOT NULL AND TRIM(genre) != ''"
             ),
             tracks_with_bpm=_count(
                 conn,
-                f"SELECT COUNT(*) FROM library WHERE {_ACTIVE} AND bpm IS NOT NULL"
+                f"SELECT COUNT(*) FROM tracks WHERE {_ACTIVE} AND bpm IS NOT NULL"
             ),
             tracks_with_key=_count(
                 conn,
-                f"SELECT COUNT(*) FROM library WHERE {_ACTIVE} AND key IS NOT NULL AND TRIM(key) != ''"
+                f"SELECT COUNT(*) FROM tracks WHERE {_ACTIVE} AND key IS NOT NULL AND TRIM(key) != ''"
             ),
             tracks_with_rating=_count(
                 conn,
-                f"SELECT COUNT(*) FROM library WHERE {_ACTIVE} AND rating IS NOT NULL AND rating != 0"
+                f"SELECT COUNT(*) FROM tracks WHERE {_ACTIVE} AND rating IS NOT NULL AND rating != 0"
             ),
         )
 

@@ -6,9 +6,9 @@ from typing import Any
 
 from .backup import create_backup
 from .constants import CAMELOT_SUFFIX_RE, DUPLICATE_SUFFIX_RE, NOISE_PREFIX_RE
-from .db import connect
+from .db import connect, table_exists, ensure_not_empty
 
-_ACTIVE = "mixxx_deleted = 0"
+_ACTIVE = "deleted = 0"
 
 # Remix/edit/bootleg/flip inside parens or brackets.
 _REMIX_RE = re.compile(
@@ -179,11 +179,13 @@ def parse_library(
     min_rank = confidence_rank.get(min_confidence, 1)
 
     with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
         rows = conn.execute(f"""
-            SELECT l.id, l.artist, l.title, tl.location AS filepath
-            FROM library l
-            JOIN track_locations tl ON l.location = tl.id
-            WHERE l.{_ACTIVE}
+            SELECT id, artist, title, path AS filepath
+            FROM tracks
+            WHERE {_ACTIVE}
         """).fetchall()
 
     planned: list[dict[str, Any]] = []
@@ -239,9 +241,9 @@ def parse_library(
         title_updates  = [(c["new_title"],  c["track_id"]) for c in planned if "new_title"  in c]
         with connect(db_path, readonly=False) as conn:
             if artist_updates:
-                conn.executemany("UPDATE library SET artist = ? WHERE id = ?", artist_updates)
+                conn.executemany("UPDATE tracks SET artist = ? WHERE id = ?", artist_updates)
             if title_updates:
-                conn.executemany("UPDATE library SET title = ? WHERE id = ?", title_updates)
+                conn.executemany("UPDATE tracks SET title = ? WHERE id = ?", title_updates)
             conn.commit()
 
     return {

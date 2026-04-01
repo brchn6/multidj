@@ -38,7 +38,6 @@ def _genres(db_path: Path) -> list[tuple]:
 # clean_genres safety
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skip(reason="multidj.clean not yet ported to MultiDJ schema (Layer 2D)")
 def test_clean_genres_dry_run_does_not_write(multidj_db):
     """Dry-run must never mutate the DB."""
     from multidj.clean import clean_genres  # type: ignore[import]
@@ -49,7 +48,6 @@ def test_clean_genres_dry_run_does_not_write(multidj_db):
     assert before == after
 
 
-@pytest.mark.skip(reason="multidj.clean not yet ported to MultiDJ schema (Layer 2D)")
 def test_clean_genres_apply_writes(multidj_db):
     """--apply must actually mutate the DB.
 
@@ -71,17 +69,15 @@ def test_clean_genres_apply_writes(multidj_db):
     assert row[0] is None
 
 
-@pytest.mark.skip(reason="multidj.clean not yet ported to MultiDJ schema (Layer 2D)")
 def test_backup_created_before_write(multidj_db, tmp_path):
     """A backup file must exist after --apply.
 
-    TODO: complete once backup.py backup_dir is configurable in tests.
     The result dict should contain a 'backup_path' key that points to an
     existing file.
     """
     from multidj.clean import clean_genres  # type: ignore[import]
 
-    result = clean_genres(str(multidj_db), apply=True, backup=True)
+    result = clean_genres(str(multidj_db), apply=True, backup=True, backup_dir=str(tmp_path))
     backup_path = result.get("backup_path")
     assert backup_path is not None, "result must include backup_path"
     assert Path(backup_path).exists(), f"backup file not found: {backup_path}"

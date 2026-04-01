@@ -6,9 +6,9 @@ from typing import Any
 
 from .backup import create_backup
 from .constants import UNINFORMATIVE_GENRES
-from .db import connect
+from .db import connect, table_exists, ensure_not_empty
 
-_ACTIVE = "mixxx_deleted = 0"
+_ACTIVE = "deleted = 0"
 _COLLAPSE_SPACES = re.compile(r"  +")
 
 
@@ -17,12 +17,16 @@ def clean_genres(
     apply: bool = False,
     limit: int | None = None,
     backup: bool = True,
+    backup_dir: str | None = None,
 ) -> dict[str, Any]:
     mode = "apply" if apply else "dry_run"
 
     with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
         rows = conn.execute(
-            f"SELECT id, genre FROM library"
+            f"SELECT id, genre FROM tracks"
             f" WHERE {_ACTIVE} AND genre IS NOT NULL AND TRIM(genre) != ''"
         ).fetchall()
 
@@ -73,22 +77,27 @@ def clean_genres(
     if limit is not None:
         planned = planned[:limit]
 
+    backup_path: str | None = None
     if apply and planned:
         if backup:
-            create_backup(db_path)
+            backup_result = create_backup(db_path, backup_dir=backup_dir)
+            backup_path = backup_result.backup_path
         with connect(db_path, readonly=False) as conn:
             for change in planned:
                 conn.execute(
-                    "UPDATE library SET genre = ? WHERE id = ?",
+                    "UPDATE tracks SET genre = ? WHERE id = ?",
                     (change["new_genre"], change["track_id"]),
                 )
             conn.commit()
 
-    return {
+    result: dict[str, Any] = {
         "mode": mode,
         "total_changes": len(planned),
         "changes": planned,
     }
+    if backup_path is not None:
+        result["backup_path"] = backup_path
+    return result
 
 
 def clean_text(
@@ -100,8 +109,11 @@ def clean_text(
     mode = "apply" if apply else "dry_run"
 
     with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
         rows = conn.execute(f"""
-            SELECT id, artist, title, album FROM library
+            SELECT id, artist, title, album FROM tracks
             WHERE {_ACTIVE}
               AND (
                 (artist IS NOT NULL AND artist != TRIM(artist))
@@ -142,7 +154,7 @@ def clean_text(
                 for field in ("artist", "title", "album"):
                     if f"new_{field}" in change:
                         conn.execute(
-                            f"UPDATE library SET {field} = ? WHERE id = ?",
+                            f"UPDATE tracks SET {field} = ? WHERE id = ?",
                             (change[f"new_{field}"], track_id),
                         )
             conn.commit()

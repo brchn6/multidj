@@ -4,16 +4,16 @@ import sqlite3
 from typing import Any
 
 from .constants import EMOJI_OR_SYMBOL_RE, UNINFORMATIVE_GENRES
-from .db import connect, table_exists
+from .db import connect, table_exists, ensure_not_empty
 
-_ACTIVE = "mixxx_deleted = 0"
+_ACTIVE = "deleted = 0"
 
 
 def _fetch_value_counts(conn: sqlite3.Connection, field: str, limit: int = 50) -> list[dict[str, Any]]:
     rows = conn.execute(
         f"""
         SELECT {field} AS value, COUNT(*) AS count
-        FROM library
+        FROM tracks
         WHERE {_ACTIVE} AND {field} IS NOT NULL AND TRIM({field}) != ''
         GROUP BY {field}
         ORDER BY count DESC, value ASC
@@ -26,13 +26,14 @@ def _fetch_value_counts(conn: sqlite3.Connection, field: str, limit: int = 50) -
 
 def audit_genres(db_path: str | None = None, top_n: int = 100) -> dict[str, Any]:
     with connect(db_path, readonly=True) as conn:
-        if not table_exists(conn, "library"):
-            raise RuntimeError("Expected Mixxx table 'library' was not found.")
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
 
         rows = conn.execute(
             f"""
             SELECT genre, COUNT(*) AS count
-            FROM library
+            FROM tracks
             WHERE {_ACTIVE} AND genre IS NOT NULL AND TRIM(genre) != ''
             GROUP BY genre
             ORDER BY count DESC, genre ASC
@@ -81,16 +82,17 @@ def audit_genres(db_path: str | None = None, top_n: int = 100) -> dict[str, Any]
 
 def audit_metadata(db_path: str | None = None) -> dict[str, Any]:
     with connect(db_path, readonly=True) as conn:
-        if not table_exists(conn, "library"):
-            raise RuntimeError("Expected Mixxx table 'library' was not found.")
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
 
         total_tracks = conn.execute(
-            f"SELECT COUNT(*) FROM library WHERE {_ACTIVE}"
+            f"SELECT COUNT(*) FROM tracks WHERE {_ACTIVE}"
         ).fetchone()[0]
 
         def coverage(field: str) -> dict[str, Any]:
             present = conn.execute(
-                f"SELECT COUNT(*) FROM library"
+                f"SELECT COUNT(*) FROM tracks"
                 f" WHERE {_ACTIVE} AND {field} IS NOT NULL AND TRIM(CAST({field} AS TEXT)) != ''"
             ).fetchone()[0]
             return {

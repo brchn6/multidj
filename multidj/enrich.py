@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from .db import connect
+from .db import connect, table_exists, ensure_not_empty
 
-_ACTIVE = "mixxx_deleted = 0"
+_ACTIVE = "deleted = 0"
 
 # Hebrew Unicode blocks:
 #   U+0590–U+05FF  — Hebrew
@@ -32,9 +32,13 @@ def enrich_language(db_path: str | None = None) -> dict[str, Any]:
     Read-only — no DB writes. Use 'crates rebuild' to act on results.
     """
     with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
+
         rows = conn.execute(f"""
             SELECT id, artist, title
-            FROM library
+            FROM tracks
             WHERE {_ACTIVE}
         """).fetchall()
 
