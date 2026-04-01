@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from .backup import create_backup
-from .db import connect
+from .db import connect, table_exists, ensure_not_empty
 
 
 def _keeper_sort_key(track: dict) -> tuple:
     """Prefer most-played, then highest-rated, then largest file."""
     return (
-        -(track["timesplayed"] or 0),
+        -(track["play_count"] or 0),
         -(track["rating"] or 0),
         -(track["filesize"] or 0),
     )
@@ -22,13 +22,12 @@ def _find_groups(db_path: str | None, by: str) -> list[dict[str, Any]]:
         if by in ("artist-title", "both"):
             rows = conn.execute("""
                 SELECT
-                    LOWER(TRIM(COALESCE(l.artist, ''))) AS norm_artist,
-                    LOWER(TRIM(COALESCE(l.title,  ''))) AS norm_title,
-                    l.id, l.artist, l.title, l.rating, l.timesplayed, l.duration,
-                    tl.location AS filepath, tl.filesize
-                FROM library l
-                LEFT JOIN track_locations tl ON l.location = tl.id
-                WHERE l.mixxx_deleted = 0
+                    LOWER(TRIM(COALESCE(artist, ''))) AS norm_artist,
+                    LOWER(TRIM(COALESCE(title,  ''))) AS norm_title,
+                    id, artist, title, rating, play_count, duration,
+                    path AS filepath, filesize
+                FROM tracks
+                WHERE deleted = 0
                 ORDER BY norm_artist, norm_title
             """).fetchall()
 
@@ -42,7 +41,7 @@ def _find_groups(db_path: str | None, by: str) -> list[dict[str, Any]]:
                     "artist": row["artist"],
                     "title": row["title"],
                     "rating": row["rating"],
-                    "timesplayed": row["timesplayed"],
+                    "play_count": row["play_count"],
                     "duration": row["duration"],
                     "filepath": row["filepath"],
                     "filesize": row["filesize"],
@@ -59,13 +58,12 @@ def _find_groups(db_path: str | None, by: str) -> list[dict[str, Any]]:
         if by in ("filesize", "both"):
             rows = conn.execute("""
                 SELECT
-                    l.id, l.artist, l.title, l.rating, l.timesplayed, l.duration,
-                    tl.location AS filepath, tl.filesize
-                FROM library l
-                LEFT JOIN track_locations tl ON l.location = tl.id
-                WHERE l.mixxx_deleted = 0
-                  AND tl.filesize IS NOT NULL AND tl.filesize > 0
-                ORDER BY tl.filesize
+                    id, artist, title, rating, play_count, duration,
+                    path AS filepath, filesize
+                FROM tracks
+                WHERE deleted = 0
+                  AND filesize IS NOT NULL AND filesize > 0
+                ORDER BY filesize
             """).fetchall()
 
             seen_fs: dict[tuple[int, Any], list[dict]] = {}
@@ -76,7 +74,7 @@ def _find_groups(db_path: str | None, by: str) -> list[dict[str, Any]]:
                     "artist": row["artist"],
                     "title": row["title"],
                     "rating": row["rating"],
-                    "timesplayed": row["timesplayed"],
+                    "play_count": row["play_count"],
                     "duration": row["duration"],
                     "filepath": row["filepath"],
                     "filesize": row["filesize"],
@@ -99,6 +97,11 @@ def dedupe(
     apply: bool = False,
     backup: bool = True,
 ) -> dict[str, Any]:
+    with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
+
     mode = "apply" if apply else "dry_run"
     all_groups = _find_groups(db_path, by)
 
@@ -125,7 +128,7 @@ def dedupe(
                 "track_id": keeper["track_id"],
                 "artist": keeper["artist"],
                 "title": keeper["title"],
-                "timesplayed": keeper["timesplayed"],
+                "play_count": keeper["play_count"],
                 "rating": keeper["rating"],
                 "filesize": keeper["filesize"],
                 "filepath": keeper["filepath"],
@@ -135,7 +138,7 @@ def dedupe(
                     "track_id": d["track_id"],
                     "artist": d["artist"],
                     "title": d["title"],
-                    "timesplayed": d["timesplayed"],
+                    "play_count": d["play_count"],
                     "rating": d["rating"],
                     "filesize": d["filesize"],
                     "filepath": d["filepath"],
@@ -149,7 +152,7 @@ def dedupe(
             create_backup(db_path)
         with connect(db_path, readonly=False) as conn:
             conn.executemany(
-                "UPDATE library SET mixxx_deleted = 1 WHERE id = ?",
+                "UPDATE tracks SET deleted = 1 WHERE id = ?",
                 [(tid,) for tid in removed_ids],
             )
             conn.commit()

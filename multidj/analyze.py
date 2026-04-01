@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from .db import connect
+from .db import connect, table_exists, ensure_not_empty
 
 
 def _progress(msg: str, end: str = "\n") -> None:
@@ -70,25 +70,28 @@ def analyze_key(
     force: bool = False,
     verbose: bool = False,
 ) -> dict[str, Any]:
+    with connect(db_path, readonly=True) as _guard_conn:
+        if table_exists(_guard_conn, "library") and not table_exists(_guard_conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(_guard_conn)
+
     mode = "apply" if apply else "dry_run"
-    where_clause = "1=1" if force else "(l.key IS NULL OR TRIM(l.key) = '')"
+    where_clause = "1=1" if force else "(key IS NULL OR TRIM(key) = '')"
 
     candidate_sql = f"""
-        SELECT l.id, l.artist, l.title, l.key, tl.location AS filepath
-        FROM library l
-        JOIN track_locations tl ON l.location = tl.id
+        SELECT id, artist, title, key, path AS filepath
+        FROM tracks
         WHERE {where_clause}
-          AND l.mixxx_deleted = 0
-        ORDER BY l.artist, l.title
+          AND deleted = 0
+        ORDER BY artist, title
     """
     if limit is not None:
         candidate_sql += f" LIMIT {int(limit)}"
 
     count_sql = f"""
-        SELECT COUNT(*) FROM library l
-        JOIN track_locations tl ON l.location = tl.id
+        SELECT COUNT(*) FROM tracks
         WHERE {where_clause}
-          AND l.mixxx_deleted = 0
+          AND deleted = 0
     """
 
     with connect(db_path, readonly=True) as conn:
@@ -174,7 +177,7 @@ def analyze_key(
         if sync_db and db_updates:
             _progress(f"Writing {len(db_updates):,} keys to DB...")
             with connect(db_path, readonly=False) as wconn:
-                wconn.executemany("UPDATE library SET key = ? WHERE id = ?", db_updates)
+                wconn.executemany("UPDATE tracks SET key = ? WHERE id = ?", db_updates)
                 wconn.commit()
             _progress("DB updated.")
 
