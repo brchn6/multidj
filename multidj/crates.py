@@ -5,7 +5,7 @@ from typing import Any
 from .backup import create_backup
 from .constants import AUTO_CRATE_PREFIXES, CATCH_ALL_CRATE_NAMES, REBUILD_CRATE_RE
 from .enrich import is_hebrew
-from .db import connect
+from .db import connect, table_exists, ensure_not_empty
 
 MIN_TRACKS_DEFAULT = 5
 
@@ -21,7 +21,7 @@ def _classify(name: str) -> str:
 
 def _fetch_crates(conn) -> list[dict[str, Any]]:
     rows = conn.execute("""
-        SELECT c.id, c.name, c.show, c.locked, c.autodj_source,
+        SELECT c.id, c.name, c.show, c.type,
                COUNT(ct.track_id) AS track_count
         FROM crates c
         LEFT JOIN crate_tracks ct ON c.id = ct.crate_id
@@ -33,10 +33,8 @@ def _fetch_crates(conn) -> list[dict[str, Any]]:
             "crate_id": r["id"],
             "name": r["name"],
             "visible": bool(r["show"]),
-            "locked": bool(r["locked"]),
-            "autodj_source": bool(r["autodj_source"]),
             "track_count": r["track_count"],
-            "type": _classify(r["name"]),
+            "type": r["type"],
         }
         for r in rows
     ]
@@ -48,6 +46,9 @@ def audit_crates(
     summary_only: bool = False,
 ) -> dict[str, Any]:
     with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
         crates = _fetch_crates(conn)
 
     # Exclude catch-alls from threshold analysis (they're not real collections).
@@ -89,13 +90,15 @@ def hide_crates(
     mode = "apply" if apply else "dry_run"
 
     with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
         crates = _fetch_crates(conn)
 
     candidates = [
         c for c in crates
         if c["track_count"] < min_tracks
         and c["visible"]
-        and not c["locked"]
         and c["type"] != "catch-all"
         and (include_hand_curated or c["type"] == "auto")
     ]
@@ -138,6 +141,9 @@ def show_crates(
     mode = "apply" if apply else "dry_run"
 
     with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
         crates = _fetch_crates(conn)
 
     candidates = [
@@ -175,12 +181,14 @@ def delete_crates(
     mode = "apply" if apply else "dry_run"
 
     with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
         crates = _fetch_crates(conn)
 
     candidates = [
         c for c in crates
         if c["track_count"] < min_tracks
-        and not c["locked"]
         and c["type"] != "catch-all"
         and (include_hand_curated or c["type"] == "auto")
     ]
@@ -228,6 +236,10 @@ def rebuild_crates(
     mode = "apply" if apply else "dry_run"
 
     with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
+
         # --- existing auto-crates to remove ---
         old_auto = [
             {"crate_id": r["id"], "name": r["name"]}
@@ -238,8 +250,8 @@ def rebuild_crates(
         # --- genre groups above threshold ---
         genre_rows = conn.execute("""
             SELECT genre, COUNT(*) AS cnt
-            FROM library
-            WHERE mixxx_deleted = 0
+            FROM tracks
+            WHERE deleted = 0
               AND genre IS NOT NULL AND TRIM(genre) != ''
             GROUP BY genre
             HAVING cnt >= ?
@@ -250,7 +262,7 @@ def rebuild_crates(
 
         # --- Hebrew tracks ---
         all_tracks = conn.execute("""
-            SELECT id, artist, title FROM library WHERE mixxx_deleted = 0
+            SELECT id, artist, title FROM tracks WHERE deleted = 0
         """).fetchall()
         hebrew_ids = [r["id"] for r in all_tracks
                       if is_hebrew(r["title"]) or is_hebrew(r["artist"])]
@@ -260,8 +272,8 @@ def rebuild_crates(
         for g in genre_groups:
             track_ids = [
                 r["id"] for r in conn.execute("""
-                    SELECT id FROM library
-                    WHERE mixxx_deleted = 0 AND genre = ?
+                    SELECT id FROM tracks
+                    WHERE deleted = 0 AND genre = ?
                 """, (g["genre"],)).fetchall()
             ]
             genre_track_map[g["genre"]] = track_ids
@@ -288,8 +300,8 @@ def rebuild_crates(
     with connect(db_path, readonly=True) as conn:
         skipped_rows = conn.execute("""
             SELECT genre, COUNT(*) AS cnt
-            FROM library
-            WHERE mixxx_deleted = 0
+            FROM tracks
+            WHERE deleted = 0
               AND genre IS NOT NULL AND TRIM(genre) != ''
             GROUP BY genre
             HAVING cnt < ?
@@ -314,7 +326,7 @@ def rebuild_crates(
             # 2. Create new crates and populate.
             for crate in crates_to_create:
                 cursor = conn.execute(
-                    "INSERT INTO crates (name, show, locked, autodj_source) VALUES (?, 1, 0, 0)",
+                    "INSERT INTO crates (name, type, show) VALUES (?, 'auto', 1)",
                     (crate["name"],),
                 )
                 crate_id = cursor.lastrowid
