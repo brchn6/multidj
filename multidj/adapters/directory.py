@@ -164,11 +164,11 @@ class DirectoryAdapter(SyncAdapter):
                             (track_id, adapter_name, now_iso),
                         )
 
-                    conn.commit()
-
                 except Exception as exc:  # noqa: BLE001
-                    conn.rollback()
                     errors.append({"path": filepath, "error": str(exc)})
+
+            # Single commit for all successful writes
+            conn.commit()
 
         return {
             "mode":             "apply",
