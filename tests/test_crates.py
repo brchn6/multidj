@@ -1,5 +1,6 @@
 import sqlite3
 from multidj.crates import audit_crates, hide_crates, show_crates, delete_crates, rebuild_crates
+from multidj.constants import BPM_RANGES
 
 
 def test_audit_classification(multidj_db):
@@ -113,3 +114,60 @@ def test_delete_protects_hand_curated(multidj_db, multidj_db_conn):
         "SELECT id FROM crates WHERE name='My Favorites'"
     ).fetchone()
     assert row is not None
+
+
+def test_rebuild_creates_bpm_crates(multidj_db, tmp_path):
+    """rebuild_crates generates BPM: crates for each range that has tracks."""
+    conn = sqlite3.connect(str(multidj_db))
+    conn.execute("UPDATE tracks SET bpm = 128.0 WHERE id = 1")
+    conn.commit()
+    conn.close()
+
+    result = rebuild_crates(str(multidj_db), apply=True, backup_dir=str(tmp_path))
+
+    conn2 = sqlite3.connect(str(multidj_db))
+    bpm_crates = conn2.execute(
+        "SELECT name FROM crates WHERE name LIKE 'BPM:%'"
+    ).fetchall()
+    conn2.close()
+
+    crate_names = {r[0] for r in bpm_crates}
+    # 128.0 BPM falls in both BPM:125-130 and BPM:128-135 (intentional overlap)
+    assert "BPM:125-130" in crate_names
+    assert "BPM:128-135" in crate_names
+
+
+def test_rebuild_bpm_crate_contains_correct_tracks(multidj_db, tmp_path):
+    """Each BPM crate contains only tracks in its range."""
+    conn = sqlite3.connect(str(multidj_db))
+    conn.execute("UPDATE tracks SET bpm = 125.0 WHERE id = 1")
+    conn.execute("UPDATE tracks SET bpm = 90.0  WHERE id = 2")
+    conn.commit()
+    conn.close()
+
+    rebuild_crates(str(multidj_db), apply=True, backup_dir=str(tmp_path))
+
+    conn2 = sqlite3.connect(str(multidj_db))
+    crate = conn2.execute(
+        "SELECT id FROM crates WHERE name = 'BPM:115-125'"
+    ).fetchone()
+    # bpm=125.0 is NOT in 115-125 (high is exclusive)
+    if crate:
+        tracks_in_crate = conn2.execute(
+            "SELECT track_id FROM crate_tracks WHERE crate_id = ?", (crate[0],)
+        ).fetchall()
+        track_ids = {r[0] for r in tracks_in_crate}
+        assert 1 not in track_ids
+    conn2.close()
+
+
+def test_rebuild_bpm_crates_dry_run_no_write(multidj_db):
+    """Dry-run does not create BPM crates."""
+    rebuild_crates(str(multidj_db), apply=False)
+
+    conn = sqlite3.connect(str(multidj_db))
+    count = conn.execute(
+        "SELECT COUNT(*) FROM crates WHERE name LIKE 'BPM:%'"
+    ).fetchone()[0]
+    conn.close()
+    assert count == 0

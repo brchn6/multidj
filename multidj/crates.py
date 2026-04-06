@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .backup import create_backup
-from .constants import AUTO_CRATE_PREFIXES, CATCH_ALL_CRATE_NAMES, REBUILD_CRATE_RE
+from .constants import AUTO_CRATE_PREFIXES, BPM_RANGES, CATCH_ALL_CRATE_NAMES, REBUILD_CRATE_RE
 from .enrich import is_hebrew
 from .db import connect, table_exists, ensure_not_empty
 
@@ -225,6 +225,7 @@ def rebuild_crates(
     min_tracks: int = MIN_TRACKS_DEFAULT,
     apply: bool = False,
     backup: bool = True,
+    backup_dir: str | None = None,
 ) -> dict[str, Any]:
     """
     Rebuild auto-crates from scratch:
@@ -312,9 +313,12 @@ def rebuild_crates(
     # Compute total track assignments (useful for both dry-run preview and apply confirmation).
     total_assignments = sum(len(c["track_ids"]) for c in crates_to_create)
 
+    bpm_crates_created = 0
+    bpm_tracks_added = 0
+
     if apply:
         if backup:
-            create_backup(db_path)
+            create_backup(db_path, backup_dir=backup_dir)
         with connect(db_path, readonly=False) as conn:
             # 1. Delete old auto-crates (entire operation is one implicit transaction).
             if old_auto:
@@ -323,7 +327,7 @@ def rebuild_crates(
                 conn.execute(f"DELETE FROM crate_tracks WHERE crate_id IN ({ph})", old_ids)
                 conn.execute(f"DELETE FROM crates WHERE id IN ({ph})", old_ids)
 
-            # 2. Create new crates and populate.
+            # 2. Create new Genre/Lang crates and populate.
             for crate in crates_to_create:
                 cursor = conn.execute(
                     "INSERT INTO crates (name, type, show) VALUES (?, 'auto', 1)",
@@ -335,6 +339,37 @@ def rebuild_crates(
                     "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
                     pairs,
                 )
+
+            # 3. Create BPM-range crates.
+            for crate_name, bpm_low, bpm_high in BPM_RANGES:
+                track_ids = [
+                    r["id"] for r in conn.execute(
+                        """
+                        SELECT id FROM tracks
+                        WHERE deleted = 0
+                          AND bpm IS NOT NULL
+                          AND bpm >= ? AND bpm < ?
+                        """,
+                        (bpm_low, bpm_high),
+                    ).fetchall()
+                ]
+                if not track_ids:
+                    continue  # don't create empty crates
+
+                conn.execute(
+                    "INSERT OR IGNORE INTO crates (name, type, show) VALUES (?, 'auto', 1)",
+                    (crate_name,),
+                )
+                crate_id = conn.execute(
+                    "SELECT id FROM crates WHERE name = ?", (crate_name,)
+                ).fetchone()[0]
+
+                conn.executemany(
+                    "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
+                    [(crate_id, tid) for tid in track_ids],
+                )
+                bpm_crates_created += 1
+                bpm_tracks_added += len(track_ids)
 
             conn.commit()
 
@@ -349,6 +384,8 @@ def rebuild_crates(
         "lang_hebrew_tracks": len(hebrew_ids),
         "skipped_genres_below_threshold": len(skipped_below),
         "skipped_genres": skipped_below,
+        "bpm_crates_created": bpm_crates_created,
+        "bpm_tracks_added": bpm_tracks_added,
         "crates": [{"name": c["name"], "track_count": c["track_count"]}
                    for c in crates_to_create],
         "deleted": old_auto,
