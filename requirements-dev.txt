@@ -1,0 +1,4 @@
+mutagen>=1.47
+pytest>=9.0
+# Optional: for `multidj analyze key` and `multidj analyze bpm`
+# librosa

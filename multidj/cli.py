@@ -198,6 +198,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--apply", action="store_true", help="Write to MultiDJ DB (default: dry-run)")
     p.add_argument("--no-backup", action="store_true", help="Skip backup before import")
 
+    p_dir = import_sub.add_parser("directory", help="Import tracks from filesystem directories")
+    p_dir.add_argument("paths", nargs="+", metavar="PATH",
+                       help="Directories to scan recursively")
+    p_dir.add_argument("--apply",     action="store_true")
+    p_dir.add_argument("--no-backup", action="store_true", dest="no_backup")
+
     # ── sync ─────────────────────────────────────────────────────────────────
     sync_p = sub.add_parser("sync", help="Push dirty tracks to DJ software")
     sync_sub = sync_p.add_subparsers(dest="sync_target", required=True)
@@ -311,6 +317,15 @@ def main(argv: list[str] | None = None) -> int:
             result = adapter.import_all(
                 multidj_db_path=resolve_db_path(args.db),
                 apply=args.apply,
+            )
+        elif args.import_target == "directory":
+            from .adapters.directory import DirectoryAdapter
+            adapter = DirectoryAdapter()
+            result = adapter.import_all(
+                multidj_db_path=resolve_db_path(args.db),
+                apply=args.apply,
+                paths=args.paths,
+                backup_dir=False if args.no_backup else None,
             )
 
     elif args.command == "sync":
