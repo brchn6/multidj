@@ -144,6 +144,12 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_p = sub.add_parser("analyze", help="Analysis and tagging actions")
     analyze_sub = analyze_p.add_subparsers(dest="analyze_target", required=True)
 
+    p_bpm = analyze_sub.add_parser("bpm", help="Detect BPM from audio for tracks where BPM is 0 or missing")
+    p_bpm.add_argument("--apply",     action="store_true")
+    p_bpm.add_argument("--force",     action="store_true", help="Re-analyze even tracks with existing BPM")
+    p_bpm.add_argument("--limit",     type=int, default=None)
+    p_bpm.add_argument("--no-backup", action="store_true", dest="no_backup")
+
     p = analyze_sub.add_parser("key", help="Detect and tag musical key (requires librosa mutagen)")
     p.add_argument("--apply",       action="store_true", help="Write changes (default: dry-run)")
     p.add_argument("--write-tags",  action="store_true", help="Write key to audio file tags")
@@ -256,15 +262,25 @@ def main(argv: list[str] | None = None) -> int:
             result = clean_text(**kwargs)
 
     elif args.command == "analyze":
-        result = analyze_key(
-            args.db,
-            apply=args.apply,
-            write_tags=args.write_tags,
-            sync_db=not args.no_sync_db,
-            limit=args.limit,
-            force=args.force,
-            verbose=args.verbose,
-        )
+        if args.analyze_target == "bpm":
+            from .analyze import analyze_bpm
+            result = analyze_bpm(
+                db_path=args.db,
+                apply=args.apply,
+                force=args.force,
+                limit=args.limit,
+                backup_dir=False if args.no_backup else None,
+            )
+        else:
+            result = analyze_key(
+                args.db,
+                apply=args.apply,
+                write_tags=args.write_tags,
+                sync_db=not args.no_sync_db,
+                limit=args.limit,
+                force=args.force,
+                verbose=args.verbose,
+            )
 
     elif args.command == "crates":
         if args.crates_target == "audit":

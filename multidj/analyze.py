@@ -61,6 +61,103 @@ def _write_tag(filepath: str, key: str) -> None:
         raise ValueError(f"Unsupported file type for tag writing: {filepath}")
 
 
+def detect_bpm(filepath: str) -> float:
+    """Detect tempo in BPM from audio file using librosa beat tracker."""
+    try:
+        import librosa  # type: ignore
+    except ImportError:
+        raise ImportError("BPM analysis requires: pip install librosa")
+    y, sr = librosa.load(filepath, sr=22050, mono=True, duration=30)
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    # librosa may return an array for tempo in newer versions
+    if hasattr(tempo, '__len__'):
+        tempo = float(tempo[0])
+    return float(tempo)
+
+
+def analyze_bpm(
+    db_path: str | None = None,
+    apply: bool = False,
+    force: bool = False,
+    limit: int | None = None,
+    backup_dir: str | None = None,
+) -> dict[str, Any]:
+    """Detect BPM for tracks where bpm is NULL or 0."""
+    from .backup import create_backup
+
+    with connect(db_path, readonly=True) as _guard:
+        if table_exists(_guard, "library") and not table_exists(_guard, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(_guard)
+
+    where = "1=1" if force else "(bpm IS NULL OR bpm = 0)"
+    sql = f"""
+        SELECT id, artist, title, path AS filepath
+        FROM tracks WHERE {where} AND deleted = 0
+        ORDER BY artist, title
+    """
+    if limit is not None:
+        sql += f" LIMIT {int(limit)}"
+
+    count_sql = f"SELECT COUNT(*) FROM tracks WHERE {where} AND deleted = 0"
+
+    with connect(db_path, readonly=True) as conn:
+        rows = conn.execute(sql).fetchall()
+        total_candidates = conn.execute(count_sql).fetchone()[0]
+
+    mode = "apply" if apply else "dry_run"
+
+    if not apply:
+        _progress(f"Dry-run: {total_candidates:,} tracks would be analyzed (run with --apply to process)")
+        return {
+            "mode": mode,
+            "total_candidates": total_candidates,
+            "processed": 0,
+            "succeeded": 0,
+            "errors": 0,
+            "error_details": [],
+        }
+
+    if backup_dir is not False:
+        create_backup(db_path, backup_dir=backup_dir)
+
+    db_updates: list[tuple[float, int]] = []
+    error_details: list[dict] = []
+    succeeded = 0
+    total = len(rows)
+
+    _progress(f"Analyzing BPM for {total:,} tracks...")
+
+    for i, row in enumerate(rows, 1):
+        label = f"{row['artist'] or ''} - {row['title'] or ''}".strip(" -") or row["filepath"]
+        _progress(f"[{i:{len(str(total))}}/{total}] {label[:60]}", end="")
+        try:
+            bpm = detect_bpm(row["filepath"])
+            db_updates.append((bpm, row["id"]))
+            succeeded += 1
+            _progress(f"  → {bpm:.1f}")
+        except ImportError:
+            raise
+        except Exception as exc:
+            _progress(f"  ERROR: {exc}")
+            error_details.append({"track_id": row["id"], "error": str(exc)})
+
+    if db_updates:
+        _progress(f"Writing {len(db_updates):,} BPM values to DB...")
+        with connect(db_path, readonly=False) as wconn:
+            wconn.executemany("UPDATE tracks SET bpm = ? WHERE id = ?", db_updates)
+            wconn.commit()
+
+    return {
+        "mode": mode,
+        "total_candidates": total_candidates,
+        "processed": total,
+        "succeeded": succeeded,
+        "errors": len(error_details),
+        "error_details": error_details,
+    }
+
+
 def analyze_key(
     db_path: str | None = None,
     apply: bool = False,

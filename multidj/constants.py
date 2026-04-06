@@ -59,3 +59,19 @@ REBUILD_CRATE_RE = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s)", re.IGNORECASE)
 # Adapters registered in the sync_state table.
 # import directory inserts dirty=1 rows for every adapter in this list.
 KNOWN_ADAPTERS: tuple[str, ...] = ("mixxx",)
+
+# BPM ranges for auto-crate generation.
+# Each entry: (crate_name, bpm_low_inclusive, bpm_high_exclusive)
+# Note: 125-130 and 128-135 overlap by design — tracks at 128-130 BPM
+# appear in both Tech House and Techno crates.
+BPM_RANGES: tuple[tuple[str, float, float], ...] = (
+    ("BPM:<90",     0.0,   90.0),
+    ("BPM:90-105",  90.0,  105.0),
+    ("BPM:105-115", 105.0, 115.0),
+    ("BPM:115-125", 115.0, 125.0),
+    ("BPM:125-130", 125.0, 130.0),
+    ("BPM:128-135", 128.0, 135.0),
+    ("BPM:135-160", 135.0, 160.0),
+    ("BPM:160-175", 160.0, 175.0),
+    ("BPM:175+",    175.0, 9999.0),
+)
