@@ -132,6 +132,75 @@ def _tracks_differ(existing: sqlite3.Row, incoming: dict) -> bool:
     return False
 
 
+def _push_crates_to_mixxx(
+    mdj_conn: sqlite3.Connection,
+    mixxx_conn: sqlite3.Connection,
+) -> dict[str, int]:
+    """Push all visible crates from MultiDJ to Mixxx.
+
+    Finds or creates each crate in Mixxx by name, then inserts
+    crate_tracks for each member track (matched by file path).
+    Returns counts of crates and tracks synced.
+    """
+    crates = mdj_conn.execute(
+        "SELECT id, name FROM crates WHERE show = 1"
+    ).fetchall()
+
+    crates_pushed = 0
+    tracks_pushed = 0
+
+    for crate in crates:
+        mdj_crate_id = crate["id"]
+        crate_name = crate["name"]
+
+        # Find or create crate in Mixxx
+        existing = mixxx_conn.execute(
+            "SELECT id FROM crates WHERE name = ?", (crate_name,)
+        ).fetchone()
+
+        if existing:
+            mx_crate_id = existing[0]
+        else:
+            cur = mixxx_conn.execute(
+                "INSERT INTO crates (name, show) VALUES (?, 1)",
+                (crate_name,),
+            )
+            mx_crate_id = cur.lastrowid
+            crates_pushed += 1
+
+        # Get track paths for this crate
+        mdj_tracks = mdj_conn.execute(
+            """
+            SELECT t.path FROM tracks t
+            JOIN crate_tracks ct ON t.id = ct.track_id
+            WHERE ct.crate_id = ? AND t.deleted = 0
+            """,
+            (mdj_crate_id,),
+        ).fetchall()
+
+        for track_row in mdj_tracks:
+            path = track_row["path"]
+            # Look up Mixxx library id by path
+            mx_track = mixxx_conn.execute(
+                """
+                SELECT l.id FROM library l
+                JOIN track_locations tl ON l.location = tl.id
+                WHERE tl.location = ?
+                """,
+                (path,),
+            ).fetchone()
+            if mx_track is None:
+                continue
+            mx_track_id = mx_track[0]
+            mixxx_conn.execute(
+                "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
+                (mx_crate_id, mx_track_id),
+            )
+            tracks_pushed += 1
+
+    return {"crates_pushed": crates_pushed, "tracks_pushed": tracks_pushed}
+
+
 class MixxxAdapter(SyncAdapter):
     def __init__(self, mixxx_db_path: Path | None = None):
         self.mixxx_path = Path(mixxx_db_path) if mixxx_db_path else DEFAULT_MIXXX_PATH
@@ -380,13 +449,17 @@ class MixxxAdapter(SyncAdapter):
                     except Exception:
                         pass
                     errors.append({"path": path, "reason": str(exc)})
+            crate_result = _push_crates_to_mixxx(mdj_conn, mixxx_conn)
+            mixxx_conn.commit()
         finally:
             mixxx_conn.close()
             mdj_conn.close()
 
         return {
-            "mode":        "apply",
-            "total_dirty": len(dirty_tracks),
-            "pushed":      pushed,
-            "errors":      errors,
+            "mode":               "apply",
+            "total_dirty":        len(dirty_tracks),
+            "pushed":             pushed,
+            "errors":             errors,
+            "crates_pushed":      crate_result["crates_pushed"],
+            "crate_tracks_pushed": crate_result["tracks_pushed"],
         }
