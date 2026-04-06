@@ -11,7 +11,10 @@ Migration from Mixxx-only tool is **complete** (Phases 0–4). All commands now 
 ## Installation and Running
 
 ```bash
-pip install -e .
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/pip install -r requirements-dev.txt
+source .venv/bin/activate      # then use `multidj` directly
 multidj import mixxx --apply   # one-time: populate MultiDJ DB from Mixxx
 multidj <command>              # primary entry point
 mixxx-tool <command>           # legacy alias (same binary)
@@ -78,8 +81,8 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 ## Tests and Linting
 
 ```bash
-pytest tests/ -v           # full suite (92 tests)
-pytest tests/test_scan.py  # single module
+.venv/bin/pytest tests/ -v           # full suite (92 tests)
+.venv/bin/pytest tests/test_scan.py  # single module
 ```
 
 Fixture DB (10 tracks) is in `tests/fixtures/data.py` — this is the ground truth for all test assertions. `make_mixxx_db()` and `make_multidj_db()` in `tests/fixtures/` build fresh SQLite files from it. Each test gets an isolated DB via `tmp_path`.

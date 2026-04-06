@@ -57,7 +57,7 @@ def _read_mixxx_tracks(mixxx_conn: sqlite3.Connection) -> list[dict]:
                 l.rating,
                 l.timesplayed,
                 l.duration,
-                l.remixer,
+                NULL          AS remixer,
                 tl.location   AS path,
                 tl.filesize,
                 k.{key_col}   AS key
@@ -78,7 +78,7 @@ def _read_mixxx_tracks(mixxx_conn: sqlite3.Connection) -> list[dict]:
                 l.rating,
                 l.timesplayed,
                 l.duration,
-                l.remixer,
+                NULL          AS remixer,
                 tl.location   AS path,
                 tl.filesize,
                 NULL          AS key
