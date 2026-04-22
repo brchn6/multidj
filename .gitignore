@@ -21,3 +21,6 @@ env/
 
 # OS
 .DS_Store
+
+# Claude Code — worktrees are ephemeral agent sandboxes, machine-specific
+.claude/worktrees/
