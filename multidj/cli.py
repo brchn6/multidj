@@ -10,11 +10,13 @@ from .analyze import analyze_key
 from .audit import audit_genres, audit_metadata
 from .backup import create_backup
 from .clean import clean_genres, clean_text
+from .config import load_config, save_config, get_music_dir
 from .crates import audit_crates, delete_crates, hide_crates, show_crates, rebuild_crates
 from .db import resolve_db_path
 from .dedupe import dedupe
 from .enrich import enrich_language
 from .parse import parse_library
+from .pipeline import run_pipeline
 from .scan import format_scan, scan_library
 from .utils import emit
 
@@ -224,6 +226,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--apply", action="store_true", help="Write to Mixxx (default: dry-run)")
     p.add_argument("--no-backup", action="store_true", help="Skip backup of Mixxx DB")
 
+    # ── pipeline ─────────────────────────────────────────────────────────────
+    p_pipeline = sub.add_parser("pipeline", help="Run full import → analyze → crates → sync pipeline")
+    p_pipeline.add_argument("--apply",        action="store_true")
+    p_pipeline.add_argument("--mixxx-db",     default=None, dest="mixxx_db")
+    p_pipeline.add_argument("--music-dir",    default=None, dest="music_dir")
+    p_pipeline.add_argument("--skip-import",  action="store_true", dest="skip_import")
+    p_pipeline.add_argument("--skip-parse",   action="store_true", dest="skip_parse")
+    p_pipeline.add_argument("--skip-bpm",     action="store_true", dest="skip_bpm")
+    p_pipeline.add_argument("--skip-key",     action="store_true", dest="skip_key")
+    p_pipeline.add_argument("--skip-energy",  action="store_true", dest="skip_energy")
+    p_pipeline.add_argument("--skip-genres",  action="store_true", dest="skip_genres")
+    p_pipeline.add_argument("--skip-crates",  action="store_true", dest="skip_crates")
+    p_pipeline.add_argument("--skip-sync",    action="store_true", dest="skip_sync")
+
     return parser
 
 
@@ -366,6 +382,42 @@ def main(argv: list[str] | None = None) -> int:
                 multidj_db_path=resolve_db_path(args.db),
                 apply=args.apply,
             )
+
+    elif args.command == "pipeline":
+        cfg = load_config()
+        music_dir = args.music_dir or get_music_dir(cfg)
+        if music_dir is None and not args.skip_import:
+            music_dir_input = input(
+                "MultiDJ music directory not set.\n"
+                "Enter the path to your main music folder: "
+            ).strip()
+            if music_dir_input:
+                import os
+                music_dir = os.path.expanduser(music_dir_input)
+                cfg["pipeline"]["music_dir"] = music_dir
+                save_config(cfg)
+                print(f"Saved to ~/.multidj/config.toml")
+
+        skip: set[str] = set()
+        if args.skip_import:  skip.add("import")
+        if args.skip_parse:   skip.add("parse")
+        if args.skip_bpm:     skip.add("bpm")
+        if args.skip_key:     skip.add("key")
+        if args.skip_energy:  skip.add("energy")
+        if args.skip_genres:  skip.add("genres")
+        if args.skip_crates:  skip.add("crates")
+        if args.skip_sync:    skip.add("sync")
+
+        result = run_pipeline(
+            db_path=args.db,
+            mixxx_db_path=args.mixxx_db,
+            cfg=cfg,
+            apply=args.apply,
+            music_dir=music_dir,
+            skip=skip,
+        )
+        emit(result, as_json=args.json)
+        return 0
 
     else:
         parser.error("Unknown command.")
