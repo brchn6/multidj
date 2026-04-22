@@ -237,6 +237,8 @@ def analyze_energy(
             _progress(f"  ERROR: {exc}")
             error_details.append({"track_id": row["id"], "error": str(exc)})
 
+    # succeeded is set after batch normalization — energy requires all raw scores
+    # before any can be stored, so we cannot count per-track like analyze_bpm does.
     succeeded = 0
     if raw_scores:
         scores = [s[1] for s in raw_scores]

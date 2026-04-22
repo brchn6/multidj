@@ -164,7 +164,7 @@ def _push_crates_to_mixxx(
             mixxx_conn.execute("DELETE FROM crate_tracks WHERE crate_id = ?", (mx_id,))
             mixxx_conn.execute("DELETE FROM crates WHERE id = ?", (mx_id,))
 
-    crates_pushed = 0
+    crates_created = 0
     tracks_pushed = 0
 
     # 2. For each MultiDJ crate: upsert in Mixxx and reconcile membership
@@ -183,7 +183,7 @@ def _push_crates_to_mixxx(
                 "INSERT INTO crates (name, show) VALUES (?, 1)", (crate_name,)
             )
             mx_crate_id = cur.lastrowid
-            crates_pushed += 1
+            crates_created += 1
 
         # Clear existing membership and repopulate (simpler than diff)
         mixxx_conn.execute(
@@ -217,7 +217,7 @@ def _push_crates_to_mixxx(
             )
             tracks_pushed += 1
 
-    return {"crates_pushed": crates_pushed, "tracks_pushed": tracks_pushed}
+    return {"crates_created": crates_created, "tracks_pushed": tracks_pushed}
 
 
 class MixxxAdapter(SyncAdapter):
@@ -479,6 +479,6 @@ class MixxxAdapter(SyncAdapter):
             "total_dirty":        len(dirty_tracks),
             "pushed":             pushed,
             "errors":             errors,
-            "crates_pushed":      crate_result["crates_pushed"],
+            "crates_created":      crate_result["crates_created"],
             "crate_tracks_pushed": crate_result["tracks_pushed"],
         }

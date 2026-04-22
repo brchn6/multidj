@@ -10,6 +10,8 @@ from .db import connect, table_exists, ensure_not_empty
 
 MIN_TRACKS_DEFAULT = 5
 
+_CAMELOT_RE = re.compile(r'^\d{1,2}[AB]$')
+
 
 def _classify(name: str) -> str:
     """Return 'catch-all', 'auto', or 'hand-curated'."""
@@ -317,6 +319,9 @@ def rebuild_crates(
 
     bpm_crates_created = 0
     bpm_tracks_added = 0
+    genre_lang_created = 0
+    key_crates_created = 0
+    energy_crates_created = 0
 
     if apply:
         if backup:
@@ -347,6 +352,7 @@ def rebuild_crates(
                     "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
                     pairs,
                 )
+                genre_lang_created += 1
 
             # 3. Create BPM-range crates (if enabled)
             bpm_enabled = (cfg or {}).get("crates", {}).get("bpm", True)
@@ -382,7 +388,6 @@ def rebuild_crates(
             # 4. Create Key: crates (Camelot notation) if enabled
             key_enabled = (cfg or {}).get("crates", {}).get("key", True)
             if key_enabled:
-                _CAMELOT_RE = re.compile(r'^\d{1,2}[AB]$')
                 key_rows = conn.execute("""
                     SELECT key, COUNT(*) AS cnt FROM tracks
                     WHERE deleted = 0 AND key IS NOT NULL AND TRIM(key) != ''
@@ -410,6 +415,7 @@ def rebuild_crates(
                         "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
                         [(crate_id, tid) for tid in track_ids],
                     )
+                    key_crates_created += 1
 
             # 5. Create Energy: crates if enabled
             energy_enabled = (cfg or {}).get("crates", {}).get("energy", True)
@@ -440,6 +446,7 @@ def rebuild_crates(
                         "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
                         [(crate_id, tid) for tid in track_ids],
                     )
+                    energy_crates_created += 1
 
             conn.commit()
 
@@ -447,7 +454,10 @@ def rebuild_crates(
         "mode": mode,
         "min_tracks_threshold": min_tracks,
         "old_auto_crates_deleted": len(old_auto),
-        "crates_created": len(crates_to_create),
+        "crates_created": genre_lang_created + key_crates_created + energy_crates_created + bpm_crates_created,
+        "genre_lang_crates": genre_lang_created,
+        "key_crates": key_crates_created,
+        "energy_crates": energy_crates_created,
         "total_assignments": total_assignments,
         "genre_crates": len(genre_groups),
         "lang_hebrew_crate": lang_crate is not None,

@@ -154,6 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_analyze_energy.add_argument("--apply", action="store_true")
     p_analyze_energy.add_argument("--force", action="store_true", help="Reprocess tracks that already have energy")
     p_analyze_energy.add_argument("--limit", type=int, default=None)
+    p_analyze_energy.add_argument("--no-backup", action="store_true", dest="no_backup")
 
     p = analyze_sub.add_parser("key", help="Detect and tag musical key (requires librosa mutagen)")
     p.add_argument("--apply",       action="store_true", help="Write changes (default: dry-run)")
@@ -289,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
                 apply=args.apply,
                 force=args.force,
                 limit=args.limit,
+                backup_dir=False if args.no_backup else None,
             )
         else:
             result = analyze_key(
