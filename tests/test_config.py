@@ -62,3 +62,16 @@ def test_get_music_dir_returns_none_when_empty(tmp_path):
     cfg_path = tmp_path / "config.toml"
     cfg = load_config(cfg_path)
     assert get_music_dir(cfg) is None
+
+
+def test_load_preserves_unknown_sections(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        "[pipeline]\nmusic_dir = '/my/music'\n\n"
+        "[crates]\nbpm = true\nkey = true\ngenre = true\nenergy = true\nlanguage = true\n\n"
+        "[bpm]\nmin_tracks = 3\n\n"
+        "[energy]\nlow_max = 0.33\nhigh_min = 0.67\n\n"
+        "[custom_section]\nfoo = 42\n"
+    )
+    cfg = load_config(cfg_path)
+    assert cfg["custom_section"]["foo"] == 42

@@ -43,6 +43,8 @@ def _serialize(cfg: dict[str, Any]) -> str:
                 escaped = val.replace("\\", "\\\\").replace('"', '\\"')
                 lines.append(f'{key} = "{escaped}"')
             else:
+                if not isinstance(val, (int, float)):
+                    raise TypeError(f"Unsupported config value type {type(val).__name__} for key {key!r}")
                 lines.append(f"{key} = {val}")
         lines.append("")
     return "\n".join(lines)
@@ -63,6 +65,10 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     for section, defaults in cfg.items():
         if section in raw:
             defaults.update(raw[section])
+    # Preserve any extra sections in the user's file not in DEFAULT_CONFIG
+    for section, values in raw.items():
+        if section not in cfg:
+            cfg[section] = dict(values)
     return cfg
 
 
