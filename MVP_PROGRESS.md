@@ -3,7 +3,7 @@
 **Stack:** Python 3.9+, SQLite (stdlib only for core), librosa + mutagen (optional, key analysis)
 **Entry point:** `multidj` (primary), `mixxx-tool` (legacy alias)
 **DB default:** `~/.multidj/library.sqlite`
-**Last verified:** 2026-04-01
+**Last verified:** 2026-04-22
 
 ---
 
@@ -15,10 +15,13 @@
 - [x] `backup.py` — timestamped `.sqlite` copies to `~/.multidj/backups/` before every write
 - [x] `models.py` — `LibrarySummary` dataclass with `to_dict()`
 - [x] `utils.py` — `emit()` for JSON / human-readable output
-- [x] `constants.py` — `UNINFORMATIVE_GENRES`, `EMOJI_OR_SYMBOL_RE`, `AUTO_CRATE_PREFIXES`, `CATCH_ALL_CRATE_NAMES`, `CAMELOT_SUFFIX_RE`, `NOISE_PREFIX_RE`, `DUPLICATE_SUFFIX_RE`, `REBUILD_CRATE_RE`, `KNOWN_ADAPTERS`
+- [x] `constants.py` — `UNINFORMATIVE_GENRES`, `EMOJI_OR_SYMBOL_RE`, `AUTO_CRATE_PREFIXES`, `CATCH_ALL_CRATE_NAMES`, `CAMELOT_SUFFIX_RE`, `NOISE_PREFIX_RE`, `DUPLICATE_SUFFIX_RE`, `REBUILD_CRATE_RE`, `CAMELOT_KEY_MAP`, `KNOWN_ADAPTERS`
+- [x] `config.py` — `load_config()`, `save_config()`, `get_music_dir()`; `~/.multidj/config.toml`; defaults written on first run; unknown sections preserved
 - [x] `cli.py` — argparse with global `--json` / `--db` flag hoisting; all subcommands wired
 - [x] `adapters/base.py` — `SyncAdapter` ABC (`import_all`, `push_track`, `full_sync`)
-- [x] `adapters/mixxx.py` — `MixxxAdapter` with full import + sync implementation
+- [x] `adapters/mixxx.py` — `MixxxAdapter` with full import + sync + crate sync implementation
+- [x] `adapters/directory.py` — `DirectoryAdapter`: import tracks from raw filesystem paths
+- [x] `pipeline.py` — `run_pipeline()`: chains all 8 steps, one backup at start, step isolation, `--skip-*` flags
 - [x] `migrations/001_initial.sql` — MultiDJ schema v1 (`tracks`, `track_tags`, `crates`, `crate_tracks`, `sync_state`, `schema_version`)
 
 ### Commands
@@ -30,12 +33,16 @@
 - [x] `audit metadata` — field coverage percentages across active tracks
 - [x] `clean genres` — dry-run/apply: case normalization, uninformative → NULL, whitespace (`--limit`, `--no-backup`)
 - [x] `clean text` — dry-run/apply: whitespace strip/collapse in artist/title/album
+- [x] `import directory` — scan a directory for audio files and import into MultiDJ DB; `--apply`, `--no-backup`
+- [x] `analyze bpm` — librosa beat tracking; `--apply`, `--force`, `--limit`, `--no-backup`; per-track error isolation
 - [x] `analyze key` — Krumhansl-Schmuckler key detection via librosa/chroma; `--apply`, `--write-tags`, `--no-sync-db`, `--force`, `--limit`
+- [x] `analyze energy` — librosa RMS × spectral centroid, min-max normalized 0–1; `--apply`, `--force`, `--limit`, `--no-backup`
+- [x] `pipeline` — chains import→parse→bpm→key→energy→clean genres→crates rebuild→sync; `--apply`, `--skip-*` per step, `--music-dir`
 - [x] `crates audit` — three-tier classification (catch-all / auto / hand-curated), threshold report, `--summary`, `--min-tracks`
 - [x] `crates hide` — set `show=0` on small auto crates (reversible), `--include-hand-curated`, `--apply`
 - [x] `crates show` — restore hidden crates, optional `--min-tracks` threshold
 - [x] `crates delete` — permanent delete of auto crates + their track assignments, `--apply`
-- [x] `crates rebuild` — delete all Genre:/Lang: auto-crates, recreate from current DB data; `--min-tracks`, `--apply`
+- [x] `crates rebuild` — delete all auto-crates, recreate from current DB; config-driven dimensions: Genre:/Lang:/BPM:/Key:/Energy:; `--min-tracks`, `--apply`
 - [x] `dedupe` — artist+title and filesize+duration matching; keeper = most-played → highest-rated → largest; `--by`, `--apply`
 - [x] `parse` — extract artist/title/remixer/featuring from filenames; confidence tiers (high/medium/low); `--apply`, `--force`, `--min-confidence`, `--limit`
 - [x] `enrich language` — detect Hebrew tracks by Unicode range (U+0590–U+05FF, U+FB1D–U+FB4F); read-only report
@@ -47,15 +54,20 @@
 - [x] `tests/conftest.py` — `mixxx_db`, `multidj_db`, `multidj_db_conn` pytest fixtures
 - [x] `tests/test_safety.py` — cross-cutting invariants: dry-run never writes, apply writes, backup created
 - [x] `tests/test_import.py` — 12 tests (count, field mapping, play_count, sync_state, idempotency, key lookup)
+- [x] `tests/test_import_directory.py` — directory adapter import tests
 - [x] `tests/test_sync.py` — 6 tests (dry-run, apply pushes data, marks clean, skips clean, dirty trigger)
 - [x] `tests/test_scan.py`, `test_audit.py`, `test_enrich.py`, `test_parse.py`, `test_clean.py`, `test_crates.py`, `test_dedupe.py`, `test_analyze.py`
-- [x] **92 tests passing**
+- [x] `tests/test_analyze_energy.py` — 6 tests (storage, --force, per-track error isolation, normalization)
+- [x] `tests/test_config.py` — 7 tests (defaults created, load/save, toggles, unknown section preservation)
+- [x] `tests/test_mixxx_crate_sync.py` — 4 tests (crates pushed, stale deletion, membership reconciliation)
+- [x] `tests/test_pipeline.py` — 5 tests (dry-run, apply, --skip-*, single backup, step isolation)
+- [x] **132 tests passing**
 
 ### Safety Model
 - [x] All commands dry-run by default; nothing written without `--apply`
 - [x] Auto backup before every write (skip with `--no-backup`)
 - [x] `dedupe --apply` and `crates delete --apply` use soft-delete (`deleted=1`) — recoverable
-- [x] Per-track error isolation in `analyze key` — one bad file does not abort the batch
+- [x] Per-track error isolation in all analyze commands — one bad file does not abort the batch
 - [x] All stats exclude soft-deleted tracks (`deleted = 0` filter everywhere)
 - [x] Wrong-DB guard in every command: clear error if pointed at a Mixxx DB instead of MultiDJ DB
 - [x] `sync mixxx --apply` backs up Mixxx DB before writing
@@ -72,8 +84,8 @@
 | 3 | Port all commands to MultiDJ schema (`tracks` table, `deleted` column) | **Done** |
 | 4 | `sync mixxx` — push dirty tracks back to Mixxx | **Done** |
 | 5 | Remove `mixxx-tool` alias once transition confirmed | Deferred |
-| 6 | **Standalone ingestion** — `import directory`, `analyze bpm`, BPM-range crates | **Next** |
-| 7 | **Mixxx crate sync** — push crates + track assignments back to Mixxx | Planned |
+| 6 | **Standalone ingestion** — `import directory`, `analyze bpm/energy`, config-driven crates | **Done** |
+| 7 | **Mixxx crate sync** — push crates + track assignments back to Mixxx | **Done** |
 | 8 | **Fingerprint enrichment** — pyacoustid → AcoustID → artist/title/genre for unknowns | Planned |
 | 9 | **Cue point detection** — librosa energy analysis → intro/drop/outro markers in DB | Planned |
 | 10 | **Mixxx cue sync** — write cue points to Mixxx `cues` table | Planned |
@@ -119,11 +131,11 @@ Note: 125–130 and 128–135 intentionally overlap — tracks at 128–130 BPM 
 
 | Priority | Item |
 |----------|------|
-| High | `import directory` not yet implemented — currently requires Mixxx as source |
-| High | Crates not synced back to Mixxx — `sync mixxx` only pushes track metadata |
-| Medium | 1,835 tracks missing key — run `multidj analyze key --apply` (needs `pip install librosa`) |
+| Medium | Tracks missing key — run `multidj analyze key --apply` (needs `pip install librosa`) |
 | Medium | Genre normalization pending — run `multidj clean genres --apply` |
+| Medium | Energy normalization is library-relative: single-track batch gets `energy=0.5` (lo==hi case) |
 | Low | `mixxx-tool` legacy alias still active |
+| Low | Crates created directly in Mixxx are overwritten on next `sync mixxx --apply` |
 
 ---
 
@@ -152,22 +164,23 @@ Note: 125–130 and 128–135 intentionally overlap — tracks at 128–130 BPM 
 # Bootstrap (from Mixxx)
 multidj import mixxx --apply
 
-# Bootstrap (from raw files — Phase 6)
-multidj import directory ~/Music/ --analyze --apply
+# Bootstrap (from raw files)
+multidj import directory ~/Music/All_Tracks --apply
 
-# Daily workflow
+# Primary daily workflow (chains all 8 steps)
+multidj pipeline --apply
+multidj pipeline --apply --skip-bpm --skip-key   # skip slow analysis
+
+# Individual steps
 multidj scan
 multidj audit genres
 multidj clean genres --apply
 multidj parse --apply
-multidj crates rebuild --apply     # genre + BPM + language crates
-multidj sync mixxx --apply         # tracks + crates → Mixxx
-
-# Enrichment
-multidj analyze bpm --apply        # detect BPM from audio (Phase 6)
+multidj analyze bpm --apply        # detect BPM from audio (requires librosa)
 multidj analyze key --apply        # detect key from audio (requires librosa)
-multidj enrich fingerprint --apply # identify unknowns via AcoustID (Phase 8)
-multidj analyze cues --apply       # detect intro/drop/outro points (Phase 9)
+multidj analyze energy --apply     # detect energy score (requires librosa)
+multidj crates rebuild --apply     # genre + BPM + key + energy + language crates
+multidj sync mixxx --apply         # tracks + crates → Mixxx
 
 # One-off operations
 multidj dedupe
@@ -175,5 +188,5 @@ multidj dedupe --apply
 multidj enrich language
 
 # Testing
-.venv/bin/pytest tests/ -v
+.venv/bin/pytest tests/ -v   # 132 tests
 ```

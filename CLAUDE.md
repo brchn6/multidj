@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `MultiDJ` (package: `multidj`) is a Python 3.9+ CLI for DJ music library management. It maintains its own SQLite DB (`~/.multidj/library.sqlite`) as the source of truth and syncs to DJ software (Mixxx first; Rekordbox/Serato as future adapters). All write commands are **dry-run by default**, automatic backups are created before any writes, and JSON output is available for machine consumption. Eventually exposed as an MCP server for agent-native access.
 
-Migration from Mixxx-only tool is **complete** (Phases 0–4). All commands now operate on the MultiDJ DB.
+Migration from Mixxx-only tool is **complete** (Phases 0–4). All commands now operate on the MultiDJ DB. Phases 6–7 (standalone ingestion, Mixxx crate sync, pipeline command) are also complete.
 
 ## Installation and Running
 
@@ -16,6 +16,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 source .venv/bin/activate      # then use `multidj` directly
 multidj import mixxx --apply   # one-time: populate MultiDJ DB from Mixxx
+multidj pipeline --apply       # daily workflow: import→parse→analyze→crates→sync
 multidj <command>              # primary entry point
 mixxx-tool <command>           # legacy alias (same binary)
 ```
@@ -28,8 +29,10 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 
 | Command | Description |
 |---|---|
+| `pipeline` | Primary daily workflow: chains all 8 steps; `--apply`, `--skip-<step>`, `--music-dir` |
 | `import mixxx` | One-time pull from `~/.mixxx/mixxxdb.sqlite` into MultiDJ DB |
-| `sync mixxx` | Push dirty tracks back to Mixxx after editing in MultiDJ |
+| `import directory PATH` | Import audio files from a directory; `--apply`, `--no-backup` |
+| `sync mixxx` | Push dirty tracks + crates back to Mixxx; `--apply`, `--no-backup` |
 | `scan` | Library statistics (track counts, metadata coverage) |
 | `backup` | Manual backup |
 | `parse` | Propose artist/title/remixer from filenames; `--apply` to write, `--min-confidence`, `--force` |
@@ -38,10 +41,12 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 | `audit metadata` | Field coverage report |
 | `clean genres` | Genre normalization (case, uninformative removal, whitespace) |
 | `clean text` | Artist/title/album text cleanup |
-| `analyze key` | Key detection via librosa (requires `pip install librosa mutagen`) |
+| `analyze bpm` | BPM detection via librosa; `--apply`, `--force`, `--limit` (requires librosa) |
+| `analyze key` | Key detection via librosa; `--apply`, `--write-tags`, `--force`, `--limit` (requires librosa) |
+| `analyze energy` | Energy score (RMS × centroid, normalized 0–1); `--apply`, `--force`, `--limit` (requires librosa) |
 | `crates audit` | Crate inventory and classification |
 | `crates hide/show/delete` | Bulk crate management |
-| `crates rebuild` | Delete all Genre:/Lang: auto-crates, recreate from current DB data |
+| `crates rebuild` | Rebuild all auto-crates (Genre:/BPM:/Key:/Energy:/Lang:) from config; `--apply`, `--min-tracks` |
 | `dedupe` | Duplicate detection (artist+title or filesize+duration) |
 
 **Global flags** (accepted anywhere in the command line): `--json`, `--db <path>`, `--version`
@@ -56,11 +61,14 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 2. **`db.py`** — `connect(db_path, readonly=True)` context manager; auto-applies SQL migrations on write connections; `resolve_db_path()`, `ensure_db_exists()`, `ensure_not_empty()`, `table_exists()`
 3. **`backup.py`** — creates timestamped DB copies before every write; returns `BackupResult`
 4. **`utils.py`** — `emit(data, json_mode)` for unified JSON/human output
-5. **`constants.py`** — uninformative genre list, crate classifier prefixes, shared regex patterns, `KNOWN_ADAPTERS`
-6. **`models.py`** — `LibrarySummary` dataclass
-7. **`adapters/base.py`** — `SyncAdapter` ABC (`import_all`, `push_track`, `full_sync`)
-8. **`adapters/mixxx.py`** — `MixxxAdapter`: reads Mixxx DB on import, writes back on sync; `_detect_key_column()` uses `PRAGMA table_info(keys)` defensively
-9. **Command modules** (`scan`, `audit`, `clean`, `analyze`, `parse`, `enrich`, `crates`, `dedupe`) — pure business logic, read-only unless `--apply` is passed
+5. **`constants.py`** — uninformative genre list, crate classifier prefixes, shared regex patterns, `CAMELOT_KEY_MAP`, `KNOWN_ADAPTERS`
+6. **`config.py`** — `load_config()`, `save_config()`, `get_music_dir()`; reads/writes `~/.multidj/config.toml`; defaults on first run; preserves unknown sections
+7. **`pipeline.py`** — `run_pipeline()`: chains 8 steps, one backup at start, per-step error isolation, respects `skip` set
+8. **`models.py`** — `LibrarySummary` dataclass
+9. **`adapters/base.py`** — `SyncAdapter` ABC (`import_all`, `push_track`, `full_sync`)
+10. **`adapters/mixxx.py`** — `MixxxAdapter`: reads Mixxx DB on import, writes back on sync + crate sync; `_push_crates_to_mixxx()` reconciles stale crates and membership
+11. **`adapters/directory.py`** — `DirectoryAdapter`: imports audio files from filesystem paths
+12. **Command modules** (`scan`, `audit`, `clean`, `analyze`, `parse`, `enrich`, `crates`, `dedupe`) — pure business logic, read-only unless `--apply` is passed
 
 **Migration system:** SQL files in `multidj/migrations/NNN_name.sql` are auto-applied in numeric order when `connect(readonly=False)` is called. Schema version tracked in `schema_version` table.
 
@@ -74,14 +82,17 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 **Key design invariants:**
 - `deleted = 0` filter applied everywhere (soft-deleted tracks excluded from all stats and operations)
 - Write operations use `executemany()` for batched DB updates
-- `analyze.py` isolates per-track errors so one bad audio file doesn't abort the batch
-- Crates use a three-tier protection model: catch-all ("New Crate") → auto-generated (`Genre:`/`Lang:` prefix) → hand-curated (everything else). Hand-curated crates are protected unless `--include-hand-curated` is passed.
+- All analyze commands isolate per-track errors so one bad audio file doesn't abort the batch
+- Crates use a three-tier protection model: catch-all ("New Crate") → auto-generated (`Genre:`/`BPM:`/`Key:`/`Energy:`/`Lang:` prefix) → hand-curated (everything else). Hand-curated crates are protected unless `--include-hand-curated` is passed.
 - Duplicates and deleted crate tracks use soft-delete (`deleted=1`), not hard delete
+- `pipeline` takes one backup at start; individual steps pass `backup_dir=False` sentinel to suppress per-step backups
+- `sync mixxx --apply` reconciles Mixxx crates: stale auto-crates deleted, membership clear-and-repopulated. MultiDJ is the source of truth.
+- Config (`~/.multidj/config.toml`) controls which crate dimensions are generated; `pipeline` reads config for music_dir and skips analyze steps if corresponding dimension is disabled
 
 ## Tests and Linting
 
 ```bash
-.venv/bin/pytest tests/ -v           # full suite (92 tests)
+.venv/bin/pytest tests/ -v           # full suite (132 tests)
 .venv/bin/pytest tests/test_scan.py  # single module
 ```
 
