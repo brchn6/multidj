@@ -61,6 +61,20 @@ def _write_tag(filepath: str, key: str) -> None:
         raise ValueError(f"Unsupported file type for tag writing: {filepath}")
 
 
+def detect_energy(filepath: str) -> float:
+    """Return raw energy proxy: mean RMS × mean spectral centroid (before normalization)."""
+    try:
+        import librosa  # type: ignore
+        import numpy as np  # type: ignore
+    except ImportError:
+        raise ImportError("Energy analysis requires: pip install librosa")
+
+    y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
+    rms = float(np.mean(librosa.feature.rms(y=y)))
+    centroid = float(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)))
+    return rms * centroid
+
+
 def detect_bpm(filepath: str) -> float:
     """Detect tempo in BPM from audio file using librosa beat tracker."""
     try:
@@ -147,6 +161,97 @@ def analyze_bpm(
         with connect(db_path, readonly=False) as wconn:
             wconn.executemany("UPDATE tracks SET bpm = ? WHERE id = ?", db_updates)
             wconn.commit()
+
+    return {
+        "mode": mode,
+        "total_candidates": total_candidates,
+        "processed": total,
+        "succeeded": succeeded,
+        "errors": len(error_details),
+        "error_details": error_details,
+    }
+
+
+def analyze_energy(
+    db_path: str | None = None,
+    apply: bool = False,
+    force: bool = False,
+    limit: int | None = None,
+    backup_dir: str | None = None,
+) -> dict[str, Any]:
+    """Detect energy level (0.0–1.0) for tracks where energy IS NULL."""
+    from .backup import create_backup
+
+    with connect(db_path, readonly=True) as _guard:
+        if table_exists(_guard, "library") and not table_exists(_guard, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(_guard)
+
+    where = "1=1" if force else "energy IS NULL"
+    sql = f"""
+        SELECT id, artist, title, path AS filepath
+        FROM tracks WHERE {where} AND deleted = 0
+        ORDER BY artist, title
+    """
+    if limit is not None:
+        sql += f" LIMIT {int(limit)}"
+
+    count_sql = f"SELECT COUNT(*) FROM tracks WHERE {where} AND deleted = 0"
+
+    with connect(db_path, readonly=True) as conn:
+        rows = conn.execute(sql).fetchall()
+        total_candidates = conn.execute(count_sql).fetchone()[0]
+
+    mode = "apply" if apply else "dry_run"
+
+    if not apply:
+        _progress(f"Dry-run: {total_candidates:,} tracks would be analyzed (run with --apply to process)")
+        return {
+            "mode": mode,
+            "total_candidates": total_candidates,
+            "processed": 0,
+            "succeeded": 0,
+            "errors": 0,
+            "error_details": [],
+        }
+
+    if backup_dir is not False:
+        create_backup(db_path, backup_dir=backup_dir)
+
+    raw_scores: list[tuple[int, float]] = []  # (track_id, raw_score)
+    error_details: list[dict] = []
+    total = len(rows)
+
+    _progress(f"Analyzing energy for {total:,} tracks...")
+
+    for i, row in enumerate(rows, 1):
+        label = f"{row['artist'] or ''} - {row['title'] or ''}".strip(" -") or row["filepath"]
+        _progress(f"[{i:{len(str(total))}}/{total}] {label[:60]}", end="")
+        try:
+            score = detect_energy(row["filepath"])
+            raw_scores.append((row["id"], score))
+            _progress("  ✓")
+        except ImportError:
+            raise
+        except Exception as exc:
+            _progress(f"  ERROR: {exc}")
+            error_details.append({"track_id": row["id"], "error": str(exc)})
+
+    succeeded = 0
+    if raw_scores:
+        scores = [s[1] for s in raw_scores]
+        lo, hi = min(scores), max(scores)
+
+        def _norm(v: float) -> float:
+            return (v - lo) / (hi - lo) if hi > lo else 0.5
+
+        db_updates: list[tuple[float, int]] = [(_norm(score), tid) for tid, score in raw_scores]
+
+        _progress(f"Writing {len(db_updates):,} energy values to DB...")
+        with connect(db_path, readonly=False) as wconn:
+            wconn.executemany("UPDATE tracks SET energy = ? WHERE id = ?", db_updates)
+            wconn.commit()
+        succeeded = len(db_updates)
 
     return {
         "mode": mode,

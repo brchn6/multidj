@@ -150,6 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_bpm.add_argument("--limit",     type=int, default=None)
     p_bpm.add_argument("--no-backup", action="store_true", dest="no_backup")
 
+    p_analyze_energy = analyze_sub.add_parser("energy", help="Detect energy level from audio")
+    p_analyze_energy.add_argument("--apply", action="store_true")
+    p_analyze_energy.add_argument("--force", action="store_true", help="Reprocess tracks that already have energy")
+    p_analyze_energy.add_argument("--limit", type=int, default=None)
+
     p = analyze_sub.add_parser("key", help="Detect and tag musical key (requires librosa mutagen)")
     p.add_argument("--apply",       action="store_true", help="Write changes (default: dry-run)")
     p.add_argument("--write-tags",  action="store_true", help="Write key to audio file tags")
@@ -276,6 +281,14 @@ def main(argv: list[str] | None = None) -> int:
                 force=args.force,
                 limit=args.limit,
                 backup_dir=False if args.no_backup else None,
+            )
+        elif args.analyze_target == "energy":
+            from .analyze import analyze_energy
+            result = analyze_energy(
+                db_path=args.db,
+                apply=args.apply,
+                force=args.force,
+                limit=args.limit,
             )
         else:
             result = analyze_key(
