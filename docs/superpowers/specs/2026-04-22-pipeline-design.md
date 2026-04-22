@@ -90,7 +90,7 @@ Per-track error isolation — one bad audio file does not abort the batch.
 
 ```toml
 [pipeline]
-music_dir = "~/Music/All_Tracks"  # scanned by import directory step
+music_dir = ""  # set on first run — app prompts if empty
 
 [crates]
 bpm      = true   # BPM:90-105, BPM:125-130, etc.
@@ -106,6 +106,28 @@ min_tracks = 3    # suppress crates with fewer tracks than this
 low_max  = 0.33
 high_min = 0.67
 ```
+
+### First-run onboarding
+
+If `music_dir` is empty (i.e. config doesn't exist yet or was just created), any command that needs it will prompt the user:
+
+```
+MultiDJ music directory not set.
+Enter the path to your main music folder: ~/Music/All_Tracks
+Saved to ~/.multidj/config.toml
+```
+
+The value is saved immediately and never asked again. It can be changed by editing the config file directly.
+
+### Ad-hoc imports from other directories
+
+Tracks do not need to live in `music_dir` to be managed by MultiDJ. The `import directory` command accepts any path:
+
+```bash
+multidj import directory /Volumes/USB/NewPurchases --apply
+```
+
+These tracks are added to the DB and automatically included in all subsequent pipeline steps (analysis, crates rebuild, Mixxx sync) — they are first-class library members regardless of where their files live. The pipeline's step 1 only scans `music_dir` for tracks not yet in the DB; it does not affect tracks already imported from other locations.
 
 ### Behavior
 
