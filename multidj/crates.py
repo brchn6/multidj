@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .backup import create_backup
-from .constants import AUTO_CRATE_PREFIXES, BPM_RANGES, CATCH_ALL_CRATE_NAMES, REBUILD_CRATE_RE
+from .constants import AUTO_CRATE_PREFIXES, BPM_RANGES, CAMELOT_KEY_MAP, CATCH_ALL_CRATE_NAMES, REBUILD_CRATE_RE
 from .enrich import is_hebrew
 from .db import connect, table_exists, ensure_not_empty
 
@@ -226,6 +227,7 @@ def rebuild_crates(
     apply: bool = False,
     backup: bool = True,
     backup_dir: str | None = None,
+    cfg: dict | None = None,
 ) -> dict[str, Any]:
     """
     Rebuild auto-crates from scratch:
@@ -320,15 +322,21 @@ def rebuild_crates(
         if backup:
             create_backup(db_path, backup_dir=backup_dir)
         with connect(db_path, readonly=False) as conn:
-            # 1. Delete old auto-crates (entire operation is one implicit transaction).
+            # 1. Delete old auto-crates
             if old_auto:
                 old_ids = [c["crate_id"] for c in old_auto]
                 ph = ",".join("?" * len(old_ids))
                 conn.execute(f"DELETE FROM crate_tracks WHERE crate_id IN ({ph})", old_ids)
                 conn.execute(f"DELETE FROM crates WHERE id IN ({ph})", old_ids)
 
-            # 2. Create new Genre/Lang crates and populate.
+            # 2. Create Genre/Lang crates (if enabled)
+            genre_enabled = (cfg or {}).get("crates", {}).get("genre", True)
+            lang_enabled  = (cfg or {}).get("crates", {}).get("language", True)
             for crate in crates_to_create:
+                if crate["name"].startswith("Genre:") and not genre_enabled:
+                    continue
+                if crate["name"].startswith("Lang:") and not lang_enabled:
+                    continue
                 cursor = conn.execute(
                     "INSERT INTO crates (name, type, show) VALUES (?, 'auto', 1)",
                     (crate["name"],),
@@ -340,36 +348,98 @@ def rebuild_crates(
                     pairs,
                 )
 
-            # 3. Create BPM-range crates.
-            for crate_name, bpm_low, bpm_high in BPM_RANGES:
-                track_ids = [
-                    r["id"] for r in conn.execute(
-                        """
-                        SELECT id FROM tracks
-                        WHERE deleted = 0
-                          AND bpm IS NOT NULL
-                          AND bpm >= ? AND bpm < ?
-                        """,
-                        (bpm_low, bpm_high),
-                    ).fetchall()
+            # 3. Create BPM-range crates (if enabled)
+            bpm_enabled = (cfg or {}).get("crates", {}).get("bpm", True)
+            if bpm_enabled:
+                for crate_name, bpm_low, bpm_high in BPM_RANGES:
+                    track_ids = [
+                        r["id"] for r in conn.execute(
+                            """
+                            SELECT id FROM tracks
+                            WHERE deleted = 0
+                              AND bpm IS NOT NULL
+                              AND bpm >= ? AND bpm < ?
+                            """,
+                            (bpm_low, bpm_high),
+                        ).fetchall()
+                    ]
+                    if not track_ids:
+                        continue
+                    conn.execute(
+                        "INSERT OR IGNORE INTO crates (name, type, show) VALUES (?, 'auto', 1)",
+                        (crate_name,),
+                    )
+                    crate_id = conn.execute(
+                        "SELECT id FROM crates WHERE name = ?", (crate_name,)
+                    ).fetchone()[0]
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
+                        [(crate_id, tid) for tid in track_ids],
+                    )
+                    bpm_crates_created += 1
+                    bpm_tracks_added += len(track_ids)
+
+            # 4. Create Key: crates (Camelot notation) if enabled
+            key_enabled = (cfg or {}).get("crates", {}).get("key", True)
+            if key_enabled:
+                _CAMELOT_RE = re.compile(r'^\d{1,2}[AB]$')
+                key_rows = conn.execute("""
+                    SELECT key, COUNT(*) AS cnt FROM tracks
+                    WHERE deleted = 0 AND key IS NOT NULL AND TRIM(key) != ''
+                    GROUP BY key
+                """).fetchall()
+                for krow in key_rows:
+                    raw_key = krow["key"]
+                    camelot = CAMELOT_KEY_MAP.get(raw_key)
+                    if camelot is None and _CAMELOT_RE.match(raw_key or ""):
+                        camelot = raw_key  # already Camelot format
+                    if camelot is None:
+                        continue  # unknown format — skip
+                    crate_name = f"Key: {camelot}"
+                    conn.execute(
+                        "INSERT OR IGNORE INTO crates (name, type, show) VALUES (?, 'auto', 1)",
+                        (crate_name,),
+                    )
+                    crate_id = conn.execute(
+                        "SELECT id FROM crates WHERE name = ?", (crate_name,)
+                    ).fetchone()[0]
+                    track_ids = [r["id"] for r in conn.execute("""
+                        SELECT id FROM tracks WHERE deleted=0 AND key=?
+                    """, (raw_key,)).fetchall()]
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
+                        [(crate_id, tid) for tid in track_ids],
+                    )
+
+            # 5. Create Energy: crates if enabled
+            energy_enabled = (cfg or {}).get("crates", {}).get("energy", True)
+            if energy_enabled:
+                ecfg = (cfg or {}).get("energy", {})
+                low_max  = float(ecfg.get("low_max",  0.33))
+                high_min = float(ecfg.get("high_min", 0.67))
+                energy_bands = [
+                    ("Energy: Low",  0.0,      low_max),
+                    ("Energy: Mid",  low_max,  high_min),
+                    ("Energy: High", high_min, 1.01),
                 ]
-                if not track_ids:
-                    continue  # don't create empty crates
-
-                conn.execute(
-                    "INSERT OR IGNORE INTO crates (name, type, show) VALUES (?, 'auto', 1)",
-                    (crate_name,),
-                )
-                crate_id = conn.execute(
-                    "SELECT id FROM crates WHERE name = ?", (crate_name,)
-                ).fetchone()[0]
-
-                conn.executemany(
-                    "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
-                    [(crate_id, tid) for tid in track_ids],
-                )
-                bpm_crates_created += 1
-                bpm_tracks_added += len(track_ids)
+                for crate_name, lo, hi in energy_bands:
+                    track_ids = [r["id"] for r in conn.execute("""
+                        SELECT id FROM tracks
+                        WHERE deleted=0 AND energy IS NOT NULL AND energy >= ? AND energy < ?
+                    """, (lo, hi)).fetchall()]
+                    if not track_ids:
+                        continue
+                    conn.execute(
+                        "INSERT OR IGNORE INTO crates (name, type, show) VALUES (?, 'auto', 1)",
+                        (crate_name,),
+                    )
+                    crate_id = conn.execute(
+                        "SELECT id FROM crates WHERE name = ?", (crate_name,)
+                    ).fetchone()[0]
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
+                        [(crate_id, tid) for tid in track_ids],
+                    )
 
             conn.commit()
 

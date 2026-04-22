@@ -27,7 +27,7 @@ EMOJI_OR_SYMBOL_RE = re.compile(r"^[^\w\s]+$", re.UNICODE)
 
 # Crate names that are auto-generated (not hand-curated).
 # Matched against the start of the crate name.
-AUTO_CRATE_PREFIXES = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s)", re.IGNORECASE)
+AUTO_CRATE_PREFIXES = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s|Key:\s|Energy:\s)", re.IGNORECASE)
 
 # Crate names that are special catch-alls (not meaningful collections).
 CATCH_ALL_CRATE_NAMES: frozenset[str] = frozenset({"New Crate"})
@@ -54,7 +54,7 @@ DUPLICATE_SUFFIX_RE = re.compile(r"\.\d+$")
 
 # Auto-crate prefixes for rebuild operations (superset of AUTO_CRATE_PREFIXES).
 # Matches Genre:, BPM:, Lang: prefixes (case-insensitive).
-REBUILD_CRATE_RE = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s)", re.IGNORECASE)
+REBUILD_CRATE_RE = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s|Key:\s|Energy:\s)", re.IGNORECASE)
 
 # Adapters registered in the sync_state table.
 # import directory inserts dirty=1 rows for every adapter in this list.
@@ -75,3 +75,22 @@ BPM_RANGES: tuple[tuple[str, float, float], ...] = (
     ("BPM:160-175", 160.0, 175.0),
     ("BPM:175+",    175.0, 9999.0),
 )
+
+# Maps key strings from detect_key() ("Cmaj", "C#min") and Camelot notation ("1A", "8B")
+# to canonical Camelot notation. detect_key() returns note+mode format.
+CAMELOT_KEY_MAP: dict[str, str] = {
+    "Cmaj": "8B",  "C#maj": "3B",  "Dbmaj": "3B",
+    "Dmaj": "10B", "D#maj": "5B",  "Ebmaj": "5B",
+    "Emaj": "12B", "Fmaj": "7B",
+    "F#maj": "2B", "Gbmaj": "2B",
+    "Gmaj": "9B",  "G#maj": "4B",  "Abmaj": "4B",
+    "Amaj": "11B", "A#maj": "6B",  "Bbmaj": "6B",
+    "Bmaj": "1B",
+    "Cmin": "5A",  "C#min": "12A", "Dbmin": "12A",
+    "Dmin": "7A",  "D#min": "2A",  "Ebmin": "2A",
+    "Emin": "9A",  "Fmin": "4A",
+    "F#min": "11A","Gbmin": "11A",
+    "Gmin": "6A",  "G#min": "1A",  "Abmin": "1A",
+    "Amin": "8A",  "A#min": "3A",  "Bbmin": "3A",
+    "Bmin": "10A",
+}

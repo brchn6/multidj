@@ -171,3 +171,69 @@ def test_rebuild_bpm_crates_dry_run_no_write(multidj_db):
     ).fetchone()[0]
     conn.close()
     assert count == 0
+
+
+def test_rebuild_creates_key_crates(multidj_db, tmp_path):
+    """Key: crates are created when tracks have key values."""
+    import sqlite3
+    conn = sqlite3.connect(str(multidj_db))
+    ids = [r[0] for r in conn.execute("SELECT id FROM tracks WHERE deleted=0").fetchall()[:3]]
+    for tid in ids:
+        conn.execute("UPDATE tracks SET key = 'Cmaj' WHERE id = ?", (tid,))
+    conn.commit()
+    conn.close()
+
+    from multidj.config import DEFAULT_CONFIG
+    import copy
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+
+    result = rebuild_crates(db_path=str(multidj_db), apply=True, backup_dir=str(tmp_path), cfg=cfg)
+    conn = sqlite3.connect(str(multidj_db))
+    key_crates = conn.execute(
+        "SELECT name FROM crates WHERE name LIKE 'Key:%'"
+    ).fetchall()
+    conn.close()
+    assert len(key_crates) >= 1
+    assert any("8B" in r[0] for r in key_crates)  # Cmaj → 8B
+
+
+def test_rebuild_creates_energy_crates(multidj_db, tmp_path):
+    """Energy: crates are created when tracks have energy values."""
+    import sqlite3
+    conn = sqlite3.connect(str(multidj_db))
+    ids = [r[0] for r in conn.execute("SELECT id FROM tracks WHERE deleted=0").fetchall()]
+    for i, tid in enumerate(ids[:9]):
+        energy = [0.1, 0.1, 0.1, 0.5, 0.5, 0.5, 0.8, 0.8, 0.8][i]
+        conn.execute("UPDATE tracks SET energy = ? WHERE id = ?", (energy, tid))
+    conn.commit()
+    conn.close()
+
+    from multidj.config import DEFAULT_CONFIG
+    import copy
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+
+    rebuild_crates(db_path=str(multidj_db), apply=True, backup_dir=str(tmp_path), cfg=cfg)
+    conn = sqlite3.connect(str(multidj_db))
+    energy_crates = [r[0] for r in conn.execute(
+        "SELECT name FROM crates WHERE name LIKE 'Energy:%'"
+    ).fetchall()]
+    conn.close()
+    assert "Energy: Low" in energy_crates
+    assert "Energy: Mid" in energy_crates
+    assert "Energy: High" in energy_crates
+
+
+def test_rebuild_respects_config_toggle(multidj_db, tmp_path):
+    """With bpm=False in config, no BPM: crates are created."""
+    from multidj.config import DEFAULT_CONFIG
+    import copy
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["crates"]["bpm"] = False
+
+    rebuild_crates(db_path=str(multidj_db), apply=True, backup_dir=str(tmp_path), cfg=cfg)
+
+    import sqlite3
+    conn = sqlite3.connect(str(multidj_db))
+    bpm_crates = conn.execute("SELECT name FROM crates WHERE name LIKE 'BPM:%'").fetchall()
+    conn.close()
+    assert len(bpm_crates) == 0
