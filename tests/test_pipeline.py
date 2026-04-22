@@ -1,8 +1,7 @@
 from __future__ import annotations
 import sqlite3
 import pytest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
+from unittest.mock import patch
 from tests.fixtures.multidj_factory import make_multidj_db
 from tests.fixtures.mixxx_factory import make_mixxx_db
 from multidj.pipeline import run_pipeline

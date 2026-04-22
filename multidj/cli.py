@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Any
 
@@ -392,11 +393,10 @@ def main(argv: list[str] | None = None) -> int:
                 "Enter the path to your main music folder: "
             ).strip()
             if music_dir_input:
-                import os
                 music_dir = os.path.expanduser(music_dir_input)
                 cfg["pipeline"]["music_dir"] = music_dir
                 save_config(cfg)
-                print(f"Saved to ~/.multidj/config.toml")
+                print("Saved to ~/.multidj/config.toml")
 
         skip: set[str] = set()
         if args.skip_import:  skip.add("import")

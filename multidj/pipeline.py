@@ -21,7 +21,7 @@ def run_pipeline(
     apply: bool = False,
     music_dir: str | None = None,
     skip: set[str] | None = None,
-    backup_dir: str | None = None,
+    backup_dir: str | None | bool = None,  # False = suppress backup (sentinel)
 ) -> dict[str, Any]:
     """Run the full MultiDJ pipeline: import → parse → bpm → key → energy → genres → crates → sync.
 
@@ -55,6 +55,8 @@ def run_pipeline(
             result = fn(**kwargs)
             _log(f"[pipeline:{name}] done")
             return {"step": name, "status": "ok", "result": result}
+        except ImportError:
+            raise
         except Exception as exc:
             _log(f"[pipeline:{name}] ERROR: {exc}")
             return {"step": name, "status": "error", "error": str(exc)}
@@ -82,7 +84,7 @@ def run_pipeline(
         db_path=db_path, apply=apply, backup_dir=False,
     ))
 
-    # Step 4: Detect key
+    # Step 4: Detect key (analyze_key has no backup_dir param — it never creates backups)
     steps.append(_run_step(
         "key", analyze_key,
         db_path=db_path, apply=apply,
