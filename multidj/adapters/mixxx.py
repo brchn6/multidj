@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -132,28 +133,45 @@ def _tracks_differ(existing: sqlite3.Row, incoming: dict) -> bool:
     return False
 
 
+_AUTO_CRATE_RE = re.compile(
+    r"^(Genre:\s|BPM:\s|Lang:\s|Key:\s|Energy:\s)", re.IGNORECASE
+)
+
+
 def _push_crates_to_mixxx(
     mdj_conn: sqlite3.Connection,
     mixxx_conn: sqlite3.Connection,
 ) -> dict[str, int]:
-    """Push all visible crates from MultiDJ to Mixxx.
+    """Push all visible MultiDJ crates to Mixxx with full reconciliation.
 
-    Finds or creates each crate in Mixxx by name, then inserts
-    crate_tracks for each member track (matched by file path).
-    Returns counts of crates and tracks synced.
+    - Creates missing crates in Mixxx by name.
+    - Reconciles crate_tracks: clears and repopulates each synced crate.
+    - Deletes auto-crates from Mixxx (Genre:, BPM:, Lang:, Key:, Energy:)
+      that no longer exist in MultiDJ.
+    - Never deletes non-auto crates created directly in Mixxx.
     """
-    crates = mdj_conn.execute(
+    mdj_crates = mdj_conn.execute(
         "SELECT id, name FROM crates WHERE show = 1"
     ).fetchall()
+    mdj_crate_names = {c["name"] for c in mdj_crates}
+
+    # 1. Remove auto-crates from Mixxx that no longer exist in MultiDJ
+    mx_crates = mixxx_conn.execute("SELECT id, name FROM crates").fetchall()
+    for mc in mx_crates:
+        name = mc[1]
+        mx_id = mc[0]
+        if _AUTO_CRATE_RE.match(name or "") and name not in mdj_crate_names:
+            mixxx_conn.execute("DELETE FROM crate_tracks WHERE crate_id = ?", (mx_id,))
+            mixxx_conn.execute("DELETE FROM crates WHERE id = ?", (mx_id,))
 
     crates_pushed = 0
     tracks_pushed = 0
 
-    for crate in crates:
+    # 2. For each MultiDJ crate: upsert in Mixxx and reconcile membership
+    for crate in mdj_crates:
         mdj_crate_id = crate["id"]
         crate_name = crate["name"]
 
-        # Find or create crate in Mixxx
         existing = mixxx_conn.execute(
             "SELECT id FROM crates WHERE name = ?", (crate_name,)
         ).fetchone()
@@ -162,13 +180,16 @@ def _push_crates_to_mixxx(
             mx_crate_id = existing[0]
         else:
             cur = mixxx_conn.execute(
-                "INSERT INTO crates (name, show) VALUES (?, 1)",
-                (crate_name,),
+                "INSERT INTO crates (name, show) VALUES (?, 1)", (crate_name,)
             )
             mx_crate_id = cur.lastrowid
             crates_pushed += 1
 
-        # Get track paths for this crate
+        # Clear existing membership and repopulate (simpler than diff)
+        mixxx_conn.execute(
+            "DELETE FROM crate_tracks WHERE crate_id = ?", (mx_crate_id,)
+        )
+
         mdj_tracks = mdj_conn.execute(
             """
             SELECT t.path FROM tracks t
@@ -179,8 +200,7 @@ def _push_crates_to_mixxx(
         ).fetchall()
 
         for track_row in mdj_tracks:
-            path = track_row["path"]
-            # Look up Mixxx library id by path
+            path = track_row[0]
             mx_track = mixxx_conn.execute(
                 """
                 SELECT l.id FROM library l
@@ -191,10 +211,9 @@ def _push_crates_to_mixxx(
             ).fetchone()
             if mx_track is None:
                 continue
-            mx_track_id = mx_track[0]
             mixxx_conn.execute(
                 "INSERT OR IGNORE INTO crate_tracks (crate_id, track_id) VALUES (?, ?)",
-                (mx_crate_id, mx_track_id),
+                (mx_crate_id, mx_track[0]),
             )
             tracks_pushed += 1
 
