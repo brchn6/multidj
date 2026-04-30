@@ -22,6 +22,8 @@ def run_pipeline(
     apply: bool = False,
     music_dir: str | None = None,
     skip: set[str] | None = None,
+    report_output: str | None = None,
+    skip_report: bool = False,
     backup_dir: str | None | bool = None,  # False = suppress backup (sentinel)
 ) -> dict[str, Any]:
     """Run the full MultiDJ pipeline: import → parse → bpm → key → energy → genres → crates → sync.
@@ -46,6 +48,8 @@ def run_pipeline(
         skip = skip | {"fix_mismatches"}
     if not cfg.get("pipeline", {}).get("clean_text", True):
         skip = skip | {"clean_text"}
+    if skip_report:
+        skip = skip | {"report"}
 
     # One backup at the start — not per step
     if apply and backup_dir is not False:
@@ -135,6 +139,19 @@ def run_pipeline(
         ))
     else:
         steps.append({"step": "sync", "status": "skipped", "reason": "mixxx_db_path not set"})
+
+    # Step 11: Generate HTML report (read-only)
+    def _report_step() -> dict[str, Any]:
+        from .report import write_html_report
+
+        output_path = report_output or "multidj_report.html"
+        write_html_report(db_path=db_path, output_path=output_path)
+        return {
+            "path": output_path,
+            "generated": True,
+        }
+
+    steps.append(_run_step("report", _report_step))
 
     errors = [s for s in steps if s["status"] == "error"]
     return {
