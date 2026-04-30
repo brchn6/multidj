@@ -5,11 +5,49 @@ from collections import Counter
 from typing import Any
 
 from .backup import create_backup
-from .constants import UNINFORMATIVE_GENRES
+from .constants import (
+    EMOJI_OR_SYMBOL_RE,
+    GENRE_MULTI_VALUE_SPLIT_RE,
+    HEBREW_CHAR_RE,
+    HEBREW_METADATA_MIN_TOKENS,
+    HEBREW_METADATA_TOKENS,
+    JUNK_TOKEN_MIN_WORDS,
+    PROTECTED_CANONICAL_GENRES,
+    SUSPICIOUS_GENRE_JUNK_TOKENS,
+    SUSPICIOUS_MULTI_VALUE_MIN_TOKENS,
+    UNINFORMATIVE_GENRES,
+)
 from .db import connect, table_exists, ensure_not_empty
 
 _ACTIVE = "deleted = 0"
 _COLLAPSE_SPACES = re.compile(r"  +")
+
+
+def _append_null_changes(
+    planned: list[dict[str, Any]],
+    entries: list[tuple[int, str]],
+    reason: str,
+) -> None:
+    for track_id, genre in entries:
+        planned.append({
+            "track_id": track_id,
+            "old_genre": genre,
+            "new_genre": None,
+            "reason": reason,
+        })
+
+
+def _split_multi_value_tokens(genre_norm: str) -> list[str]:
+    if not any(sep in genre_norm for sep in (",", "/", "|")):
+        return []
+    return [token.strip() for token in GENRE_MULTI_VALUE_SPLIT_RE.split(genre_norm) if token.strip()]
+
+
+def _contains_junk_token(genre_norm: str) -> bool:
+    for token in SUSPICIOUS_GENRE_JUNK_TOKENS:
+        if re.search(rf"\\b{re.escape(token)}\\b", genre_norm):
+            return True
+    return any(token in genre_norm for token in HEBREW_METADATA_TOKENS)
 
 
 def clean_genres(
@@ -41,13 +79,45 @@ def clean_genres(
     for norm_key, entries in groups.items():
         # Null uninformative genres.
         if norm_key in UNINFORMATIVE_GENRES:
-            for track_id, genre in entries:
-                planned.append({
-                    "track_id": track_id,
-                    "old_genre": genre,
-                    "new_genre": None,
-                    "reason": "uninformative",
-                })
+            _append_null_changes(planned, entries, "uninformative")
+            continue
+
+        if EMOJI_OR_SYMBOL_RE.match(norm_key):
+            _append_null_changes(planned, entries, "symbol_only")
+            continue
+
+        multi_tokens = _split_multi_value_tokens(norm_key)
+        token_count = len(multi_tokens)
+        has_multi_value = token_count > 1
+        all_tokens_protected = has_multi_value and all(
+            token in PROTECTED_CANONICAL_GENRES for token in multi_tokens
+        )
+        contains_hebrew = bool(HEBREW_CHAR_RE.search(norm_key))
+        has_hebrew_metadata = any(token in norm_key for token in HEBREW_METADATA_TOKENS)
+        has_junk_token = _contains_junk_token(norm_key)
+
+        if (
+            contains_hebrew
+            and has_multi_value
+            and not all_tokens_protected
+            and (token_count >= HEBREW_METADATA_MIN_TOKENS or has_hebrew_metadata)
+        ):
+            _append_null_changes(planned, entries, "hebrew_metadata_junk")
+            continue
+
+        if (
+            has_multi_value
+            and token_count >= SUSPICIOUS_MULTI_VALUE_MIN_TOKENS
+            and not all_tokens_protected
+        ):
+            _append_null_changes(planned, entries, "suspicious_multi_value")
+            continue
+
+        if has_junk_token and (
+            (has_multi_value and not all_tokens_protected)
+            or len(norm_key.split()) >= JUNK_TOKEN_MIN_WORDS
+        ):
+            _append_null_changes(planned, entries, "junk_token")
             continue
 
         # Fix whitespace on each entry.
