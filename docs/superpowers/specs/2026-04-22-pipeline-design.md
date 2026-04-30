@@ -190,3 +190,6 @@ All tests use isolated fixture DBs via `tmp_path` — no writes to `~/.multidj/`
 - Pipeline expanded to 10 steps: `fix_mismatches` (step 2) auto-corrects artist/title swaps across all active tracks; `clean_text` (step 8) strips promo markers from artist/title/album.
 - Added persistent DB path config: `multidj config set-db <path>` stores `[db].path`, and commands now use it when `--db` is omitted.
 - Parse now skips junk artist/title proposals (numeric-only and `free`/`dl`/`download` marker values) to reduce bad suggestions in common use.
+- Added `multidj report dashboard` for standalone interactive HTML dashboard output with optional `--output` path.
+- Pipeline report step now generates the interactive dashboard by default while remaining read-only and non-fatal.
+- Added experimental Camelot harmonic transition analysis/visualization in crate views (UI-only interactions, no DB persistence).

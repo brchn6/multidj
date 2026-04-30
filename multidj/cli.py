@@ -19,6 +19,7 @@ from .dedupe import dedupe
 from .enrich import enrich_language
 from .parse import parse_library
 from .pipeline import run_pipeline
+from .report import write_dashboard_report
 from .scan import format_scan, scan_library
 from .utils import emit
 
@@ -253,6 +254,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipeline.add_argument("--skip-clean-text",       action="store_true", dest="skip_clean_text")
     p_pipeline.add_argument("--skip-crates",           action="store_true", dest="skip_crates")
     p_pipeline.add_argument("--skip-sync",             action="store_true", dest="skip_sync")
+    p_pipeline.add_argument("--report-output",         default=None, dest="report_output",
+                            help="Output path for HTML report (default: ./multidj_report.html)")
+    p_pipeline.add_argument("--skip-report",           action="store_true", dest="skip_report",
+                            help="Disable HTML report generation")
+
+    # ── report ───────────────────────────────────────────────────────────────
+    report_p = sub.add_parser("report", help="Generate library reports")
+    report_sub = report_p.add_subparsers(dest="report_target", required=True)
+    p = report_sub.add_parser("dashboard", help="Generate standalone interactive HTML dashboard")
+    p.add_argument("--output", default="multidj_report.html",
+                   help="Output HTML path (default: ./multidj_report.html)")
 
     return parser
 
@@ -439,6 +451,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_clean_text:      skip.add("clean_text")
         if args.skip_crates:          skip.add("crates")
         if args.skip_sync:            skip.add("sync")
+        if args.skip_report:          skip.add("report")
 
         result = run_pipeline(
             db_path=args.db,
@@ -447,9 +460,26 @@ def main(argv: list[str] | None = None) -> int:
             apply=args.apply,
             music_dir=music_dir,
             skip=skip,
+            report_output=args.report_output,
+            skip_report=args.skip_report,
         )
         emit(result, as_json=args.json)
         return 0
+
+    elif args.command == "report":
+        if args.report_target == "dashboard":
+            write_dashboard_report(args.db, args.output)
+            result = {
+                "mode": "read_only",
+                "report": {
+                    "path": args.output,
+                    "generated": True,
+                    "type": "dashboard",
+                },
+            }
+        else:
+            parser.error("Unknown report command.")
+            return 2
 
     else:
         parser.error("Unknown command.")
