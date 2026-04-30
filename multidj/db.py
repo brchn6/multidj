@@ -12,7 +12,17 @@ MIXXX_DB_PATH   = Path("~/.mixxx/mixxxdb.sqlite").expanduser()
 
 def resolve_db_path(db_path: str | None = None) -> Path:
     candidate = db_path or os.environ.get("MULTIDJ_DB_PATH")
-    return Path(candidate).expanduser() if candidate else DEFAULT_DB_PATH
+    if candidate:
+        return Path(candidate).expanduser()
+    # Fall back to db.path from config if set
+    try:
+        from .config import load_config
+        cfg_path = load_config().get("db", {}).get("path", "").strip()
+        if cfg_path:
+            return Path(cfg_path).expanduser()
+    except Exception:
+        pass
+    return DEFAULT_DB_PATH
 
 
 def ensure_db_exists(db_path: Path) -> None:

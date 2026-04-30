@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..adapters.base import SyncAdapter
+from ..audit import detect_title_artist_swap_mismatch
 from ..backup import create_backup
 from ..constants import KNOWN_ADAPTERS
 from ..db import connect
@@ -90,12 +91,23 @@ class DirectoryAdapter(SyncAdapter):
         new_tracks = 0
         updated_tracks = 0
         unchanged_tracks = 0
+        auto_swapped_artist_title = 0
         errors: list[dict] = []
 
         with connect(str(multidj_db_path), readonly=False) as conn:
             for filepath in audio_files:
                 try:
                     tags = _read_tags(filepath)
+                    mismatch = detect_title_artist_swap_mismatch(
+                        filepath,
+                        tags.get("artist"),
+                        tags.get("title"),
+                    )
+                    if mismatch is not None:
+                        tags["artist"] = mismatch["suggested_artist"]
+                        tags["title"] = mismatch["suggested_title"]
+                        auto_swapped_artist_title += 1
+
                     existing = conn.execute(
                         "SELECT id, artist, title, genre, bpm FROM tracks WHERE path = ?",
                         (filepath,),
@@ -167,6 +179,20 @@ class DirectoryAdapter(SyncAdapter):
                 except Exception as exc:  # noqa: BLE001
                     errors.append({"path": filepath, "error": str(exc)})
 
+            # Soft-delete tracks whose files no longer exist on disk
+            removed_tracks = 0
+            scanned_set = set(audio_files)
+            existing_active = conn.execute(
+                "SELECT id, path FROM tracks WHERE deleted = 0 AND path IS NOT NULL"
+            ).fetchall()
+            for erow in existing_active:
+                epath = erow["path"]
+                if epath not in scanned_set and not os.path.exists(epath):
+                    conn.execute(
+                        "UPDATE tracks SET deleted = 1 WHERE id = ?", (erow["id"],)
+                    )
+                    removed_tracks += 1
+
             # Single commit for all successful writes
             conn.commit()
 
@@ -176,6 +202,8 @@ class DirectoryAdapter(SyncAdapter):
             "new_tracks":       new_tracks,
             "updated_tracks":   updated_tracks,
             "unchanged_tracks": unchanged_tracks,
+            "auto_swapped_artist_title": auto_swapped_artist_title,
+            "removed_tracks":   removed_tracks,
             "errors":           errors,
         }
 

@@ -150,3 +150,46 @@ def test_directory_import_recurses_subdirectories(tmp_path):
         result = adapter.import_all(multidj_db_path=db_path, paths=[str(tmp_path / "music")], apply=True)
 
     assert result["total_found"] == 1
+
+
+def test_directory_import_soft_deletes_removed_files(tmp_path):
+    """Tracks whose files no longer exist on disk are soft-deleted (deleted=1)."""
+    db_path = make_multidj_db(tmp_path / "library.sqlite")
+    audio_dir = tmp_path / "music"
+    audio_dir.mkdir()
+    track_file = audio_dir / "Gone Track.mp3"
+    track_file.write_bytes(b"")
+
+    fake_tags = MagicMock()
+    fake_tags.get.side_effect = lambda k, d=None: {"artist": ["X"], "title": ["Y"]}.get(k, d or [])
+    fake_tags.info.length = 200.0
+
+    from multidj.adapters.directory import DirectoryAdapter
+    adapter = DirectoryAdapter()
+
+    # First import: track exists on disk → imported as active
+    with patch("multidj.adapters.directory.MutagenFile", return_value=fake_tags):
+        adapter.import_all(multidj_db_path=db_path, paths=[str(audio_dir)], apply=True)
+
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT deleted FROM tracks WHERE path=?", (str(track_file),)
+    ).fetchone()
+    conn.close()
+    assert row[0] == 0, "Track should be active after first import"
+
+    # Remove file from disk
+    track_file.unlink()
+
+    # Second import: empty dir — file gone → should be soft-deleted
+    with patch("multidj.adapters.directory.MutagenFile", return_value=fake_tags):
+        result = adapter.import_all(multidj_db_path=db_path, paths=[str(audio_dir)], apply=True)
+
+    assert result["removed_tracks"] == 1
+
+    conn2 = sqlite3.connect(str(db_path))
+    row2 = conn2.execute(
+        "SELECT deleted FROM tracks WHERE path=?", (str(track_file),)
+    ).fetchone()
+    conn2.close()
+    assert row2[0] == 1, "Track should be soft-deleted when file disappears"

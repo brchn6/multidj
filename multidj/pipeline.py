@@ -4,8 +4,9 @@ import sys
 from typing import Any
 
 from .analyze import analyze_bpm, analyze_energy, analyze_key
+from .audit import fix_mismatches
 from .backup import create_backup
-from .clean import clean_genres
+from .clean import clean_genres, clean_text
 from .crates import rebuild_crates
 from .parse import parse_library
 
@@ -41,6 +42,10 @@ def run_pipeline(
         skip = skip | {"bpm"}
     if not cfg.get("crates", {}).get("key", True):
         skip = skip | {"key"}
+    if not cfg.get("pipeline", {}).get("fix_mismatches", True):
+        skip = skip | {"fix_mismatches"}
+    if not cfg.get("pipeline", {}).get("clean_text", True):
+        skip = skip | {"clean_text"}
 
     # One backup at the start — not per step
     if apply and backup_dir is not False:
@@ -72,7 +77,13 @@ def run_pipeline(
     else:
         steps.append({"step": "import", "status": "skipped", "reason": "music_dir not set"})
 
-    # Step 2: Parse filenames
+    # Step 2: Fix artist/title swap mismatches from filename convention
+    steps.append(_run_step(
+        "fix_mismatches", fix_mismatches,
+        db_path=db_path, apply=apply, backup=False,
+    ))
+
+    # Step 3: Parse filenames
     steps.append(_run_step(
         "parse", parse_library,
         db_path=db_path, apply=apply, backup=False,
@@ -102,7 +113,13 @@ def run_pipeline(
         db_path=db_path, apply=apply, backup=False,
     ))
 
-    # Step 7: Rebuild crates
+    # Step 7: Clean artist/title/album text noise
+    steps.append(_run_step(
+        "clean_text", clean_text,
+        db_path=db_path, apply=apply, backup=False,
+    ))
+
+    # Step 8: Rebuild crates
     steps.append(_run_step(
         "crates", rebuild_crates,
         db_path=db_path, apply=apply, backup=False, cfg=cfg,

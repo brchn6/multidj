@@ -2062,3 +2062,13 @@ git commit -m "feat: sync cue points from MultiDJ to Mixxx cues table"
 - `analyze_bpm(db_path, apply, force, limit, backup_dir)` — matches cli.py wiring
 - `DirectoryAdapter.import_all(multidj_db_path, apply, paths, backup_dir)` — matches cli.py wiring
 - `BPM_RANGES: tuple[tuple[str, float, float], ...]` — used in Task 2 (definition) and Task 4 (crate building)
+
+## Repository Sync Note (2026-04-30)
+
+- Clean text behavior now strips promotional noise markers from artist/title tails, including free, dl, and download variants.
+- BPM analysis now samples start/middle/end windows and reports variable-tempo cases instead of hiding half/double-time ambiguity.
+- Directory import now includes artist-title swap mismatch detection for stronger metadata hygiene during ingestion.
+- Directory import now soft-deletes (`deleted=1`) tracks whose files no longer exist on disk after a rescan.
+- Pipeline expanded to 10 steps: `fix_mismatches` (step 2) auto-corrects artist/title swaps across all active tracks; `clean_text` (step 8) strips promo markers from artist/title/album.
+- Added persistent DB path config: `multidj config set-db <path>` stores `[db].path`, and commands now use it when `--db` is omitted.
+- Parse now skips junk artist/title proposals (numeric-only and `free`/`dl`/`download` marker values) to reduce bad suggestions in common use.

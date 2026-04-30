@@ -40,8 +40,8 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 | `audit genres` | Genre distribution, collisions, suspicious values |
 | `audit metadata` | Field coverage report |
 | `clean genres` | Genre normalization (case, uninformative removal, whitespace) |
-| `clean text` | Artist/title/album text cleanup |
-| `analyze bpm` | BPM detection via librosa; `--apply`, `--force`, `--limit` (requires librosa) |
+| `clean text` | Artist/title/album cleanup + mapped trailing garbage removal (promo/download/version markers) |
+| `analyze bpm` | BPM detection via librosa across start/middle/end windows; reports variable-BPM tracks; `--apply`, `--force`, `--limit` (requires librosa) |
 | `analyze key` | Key detection via librosa; `--apply`, `--write-tags`, `--force`, `--limit` (requires librosa) |
 | `analyze energy` | Energy score (RMS × centroid, normalized 0–1); `--apply`, `--force`, `--limit` (requires librosa) |
 | `crates audit` | Crate inventory and classification |
@@ -99,3 +99,13 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 Fixture DB (10 tracks) is in `tests/fixtures/data.py` — this is the ground truth for all test assertions. `make_mixxx_db()` and `make_multidj_db()` in `tests/fixtures/` build fresh SQLite files from it. Each test gets an isolated DB via `tmp_path`.
 
 No linting config. PEP 8 conventions with type hints throughout.
+
+## Repository Sync Note (2026-04-30)
+
+- Clean text behavior now strips promotional noise markers from artist/title tails, including free, dl, and download variants.
+- BPM analysis now samples start/middle/end windows and reports variable-tempo cases instead of hiding half/double-time ambiguity.
+- Directory import now includes artist-title swap mismatch detection for stronger metadata hygiene during ingestion.
+- Directory import now soft-deletes (`deleted=1`) tracks whose files no longer exist on disk after a rescan.
+- Pipeline expanded to 10 steps: `fix_mismatches` (step 2) auto-corrects artist/title swaps across all active tracks; `clean_text` (step 8) strips promo markers from artist/title/album.
+- Added persistent DB path config: `multidj config set-db <path>` stores `[db].path`, and commands now use it when `--db` is omitted.
+- Parse now skips junk artist/title proposals (numeric-only and `free`/`dl`/`download` marker values) to reduce bad suggestions in common use.

@@ -67,3 +67,13 @@ Agent operating guide for this repository.
 - This repo may be run against the wrong DB path; commands often guard against Mixxx DB usage.
 - `pipeline --apply` should take one backup at start, not one per step.
 - Crate sync to Mixxx reconciles stale auto crates and membership; avoid partial sync logic changes unless fully tested.
+
+## Repository Sync Note (2026-04-30)
+
+- Clean text behavior now strips promotional noise markers from artist/title tails, including free, dl, and download variants.
+- BPM analysis now samples start/middle/end windows and reports variable-tempo cases instead of hiding half/double-time ambiguity.
+- Directory import now includes artist-title swap mismatch detection for stronger metadata hygiene during ingestion.
+- Directory import now soft-deletes (`deleted=1`) tracks whose files no longer exist on disk after a rescan.
+- Pipeline expanded to 10 steps: `fix_mismatches` (step 2) auto-corrects artist/title swaps across all active tracks; `clean_text` (step 8) strips promo markers from artist/title/album.
+- Added persistent DB path config: `multidj config set-db <path>` stores `[db].path`, and commands now use it when `--db` is omitted.
+- Parse now skips junk artist/title proposals (numeric-only and `free`/`dl`/`download` marker values) to reduce bad suggestions in common use.
