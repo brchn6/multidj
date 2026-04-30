@@ -22,6 +22,47 @@ UNINFORMATIVE_GENRES: frozenset[str] = frozenset({
     "nonprofits & activism",
 })
 
+# Canonical genre spellings that should be preserved by cleaning.
+PROTECTED_CANONICAL_GENRES: dict[str, str] = {
+    "house": "House",
+    "techno": "Techno",
+    "donk": "Donk",
+    "ukg": "UKG",
+    "uk garage": "UK Garage",
+    "drum & bass": "Drum & Bass",
+    "dancehall": "Dancehall",
+    "afro house": "Afro House",
+    "hard dance": "Hard Dance",
+    "hardtek": "Hardtek",
+    "moombahton": "Moombahton",
+    "trance": "Trance",
+    "disco": "Disco",
+}
+
+# Obvious metadata terms that often pollute genre tags.
+SUSPICIOUS_GENRE_JUNK_TOKENS: frozenset[str] = frozenset({
+    "free download",
+    "download",
+    "remix",
+    "teaser",
+    "set",
+    "dj",
+})
+
+# Hebrew metadata terms commonly seen in artist/title junk within genre fields.
+HEBREW_METADATA_TOKENS: frozenset[str] = frozenset({"רמיקס"})
+
+# Conservative thresholds for suspicious genre string detection.
+SUSPICIOUS_MULTI_VALUE_MIN_TOKENS = 4
+HEBREW_METADATA_MIN_TOKENS = 4
+JUNK_TOKEN_MIN_WORDS = 5
+
+# Splits multi-value strings such as "A, B / C | D".
+GENRE_MULTI_VALUE_SPLIT_RE = re.compile(r"\s*[,/|]\s*")
+
+# Detects Hebrew characters in genre strings.
+HEBREW_CHAR_RE = re.compile(r"[\u0590-\u05FF]")
+
 # Matches strings composed entirely of emoji / non-word symbols.
 EMOJI_OR_SYMBOL_RE = re.compile(r"^[^\w\s]+$", re.UNICODE)
 

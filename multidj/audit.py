@@ -1,12 +1,51 @@
 from __future__ import annotations
 
+import re
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from .constants import EMOJI_OR_SYMBOL_RE, UNINFORMATIVE_GENRES
 from .db import connect, table_exists, ensure_not_empty
 
 _ACTIVE = "deleted = 0"
+_TITLE_ARTIST_FILENAME_RE = re.compile(r"^\s*(?:\d+\s*-\s*)?(.*?)\s*-\s*(.*?)\s*$")
+
+
+def _norm_text(value: str | None) -> str:
+    return (value or "").strip().casefold()
+
+
+def detect_title_artist_swap_mismatch(path: str, artist: str | None, title: str | None) -> dict[str, Any] | None:
+    """Detect rows where filename follows Title - Artist but tags are Artist=Title and Title=Artist."""
+    if not path:
+        return None
+
+    stem = Path(path).stem
+    match = _TITLE_ARTIST_FILENAME_RE.match(stem)
+    if not match:
+        return None
+
+    parsed_title = match.group(1).strip()
+    parsed_artist = match.group(2).strip()
+    if not parsed_title or not parsed_artist:
+        return None
+
+    artist_norm = _norm_text(artist)
+    title_norm = _norm_text(title)
+    parsed_title_norm = _norm_text(parsed_title)
+    parsed_artist_norm = _norm_text(parsed_artist)
+
+    is_swapped = artist_norm == parsed_title_norm and title_norm == parsed_artist_norm
+    if not is_swapped:
+        return None
+
+    return {
+        "parsed_title": parsed_title,
+        "parsed_artist": parsed_artist,
+        "suggested_artist": parsed_artist,
+        "suggested_title": parsed_title,
+    }
 
 
 def _fetch_value_counts(conn: sqlite3.Connection, field: str, limit: int = 50) -> list[dict[str, Any]]:
@@ -107,3 +146,105 @@ def audit_metadata(db_path: str | None = None) -> dict[str, Any]:
             "coverage": [coverage(f) for f in ("artist", "title", "genre", "bpm", "key", "album")],
             "top_genres": _fetch_value_counts(conn, "genre", limit=20),
         }
+
+
+def audit_mismatches(db_path: str | None = None, limit: int = 100) -> dict[str, Any]:
+    with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
+
+        rows = conn.execute(
+            f"""
+            SELECT id, path, artist, title
+            FROM tracks
+            WHERE {_ACTIVE}
+              AND path IS NOT NULL
+              AND artist IS NOT NULL AND TRIM(artist) != ''
+              AND title IS NOT NULL AND TRIM(title) != ''
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    mismatches: list[dict[str, Any]] = []
+    for row in rows:
+        mismatch = detect_title_artist_swap_mismatch(row["path"], row["artist"], row["title"])
+        if mismatch is None:
+            continue
+        mismatches.append({
+            "track_id": int(row["id"]),
+            "path": row["path"],
+            "artist": row["artist"],
+            "title": row["title"],
+            **mismatch,
+            "reason": "filename_title_artist_swap",
+        })
+        if len(mismatches) >= limit:
+            break
+
+    return {
+        "total_candidates": len(rows),
+        "total_mismatches": len(mismatches),
+        "mismatches": mismatches,
+    }
+
+
+def fix_mismatches(
+    db_path: str | None = None,
+    apply: bool = False,
+    backup: bool = False,
+) -> dict[str, Any]:
+    """Detect and optionally correct artist/title swap mismatches across all active tracks.
+
+    This is the pipeline-safe version of audit_mismatches — it reads all rows,
+    finds swaps, and writes the corrections in a single pass when apply=True.
+    No backup by default (pipeline takes one at the start).
+    """
+    from .backup import create_backup
+
+    if apply and backup:
+        create_backup(db_path)
+
+    with connect(db_path, readonly=True) as conn:
+        if table_exists(conn, "library") and not table_exists(conn, "tracks"):
+            raise RuntimeError("Pointed at a Mixxx DB. Run 'multidj import mixxx' first.")
+        ensure_not_empty(conn)
+        rows = conn.execute(
+            f"""
+            SELECT id, path, artist, title
+            FROM tracks
+            WHERE {_ACTIVE}
+              AND path IS NOT NULL
+              AND artist IS NOT NULL AND TRIM(artist) != ''
+              AND title IS NOT NULL AND TRIM(title) != ''
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    fixes: list[dict[str, Any]] = []
+    for row in rows:
+        mismatch = detect_title_artist_swap_mismatch(row["path"], row["artist"], row["title"])
+        if mismatch is None:
+            continue
+        fixes.append({
+            "track_id": int(row["id"]),
+            "old_artist": row["artist"],
+            "old_title": row["title"],
+            "new_artist": mismatch["suggested_artist"],
+            "new_title": mismatch["suggested_title"],
+        })
+
+    if apply and fixes:
+        with connect(db_path, readonly=False) as conn:
+            conn.executemany(
+                "UPDATE tracks SET artist=?, title=? WHERE id=?",
+                [(f["new_artist"], f["new_title"], f["track_id"]) for f in fixes],
+            )
+            conn.commit()
+
+    return {
+        "mode": "apply" if apply else "dry_run",
+        "total_candidates": len(rows),
+        "total_fixed": len(fixes),
+        "fixes": fixes,
+    }

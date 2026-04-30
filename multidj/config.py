@@ -10,6 +10,9 @@ except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "db": {
+        "path": "",
+    },
     "pipeline": {
         "music_dir": "",
     },
