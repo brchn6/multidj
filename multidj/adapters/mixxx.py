@@ -403,7 +403,8 @@ class MixxxAdapter(SyncAdapter):
         Dry-run mode: lists dirty tracks without writing.
         Apply mode: pushes each dirty track to Mixxx, marks dirty=0 on success.
         """
-        multidj_db_path = Path(multidj_db_path)
+        from ..db import resolve_db_path
+        multidj_db_path = resolve_db_path(str(multidj_db_path) if multidj_db_path else None)
 
         # Open MultiDJ DB to read dirty tracks
         mdj_conn = sqlite3.connect(str(multidj_db_path))
