@@ -106,6 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
     config_sub = config_p.add_subparsers(dest="config_target", required=True)
     p = config_sub.add_parser("set-db", help="Save default DB path to config (~/.multidj/config.toml)")
     p.add_argument("db_path_value", metavar="PATH", help="Path to the MultiDJ SQLite database")
+    p = config_sub.add_parser("set-music-dir", help="Save default music directory to config")
+    p.add_argument("music_dir_value", metavar="PATH", help="Path to your main music folder")
     config_sub.add_parser("show", help="Print current config")
 
     # ── scan ─────────────────────────────────────────────────────────────────
@@ -283,6 +285,11 @@ def main(argv: list[str] | None = None) -> int:
             cfg_data.setdefault("db", {})["path"] = db_val
             save_config(cfg_data)
             emit(f"Default DB path set to: {db_val}", as_json=args.json)
+        elif args.config_target == "set-music-dir":
+            music_val = str(Path(args.music_dir_value).expanduser())
+            cfg_data.setdefault("pipeline", {})["music_dir"] = music_val
+            save_config(cfg_data)
+            emit(f"Default music dir set to: {music_val}", as_json=args.json)
         else:  # show
             import json as _json
             emit(_json.dumps(cfg_data, indent=2) if args.json else
