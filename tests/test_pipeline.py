@@ -36,7 +36,7 @@ def test_dry_run_returns_step_summaries(multidj_db, mixxx_db, cfg, tmp_path):
     )
     assert result["mode"] == "dry_run"
     assert "steps" in result
-    assert len(result["steps"]) == 11
+    assert len(result["steps"]) == 12
     step_names = [s["step"] for s in result["steps"]]
     assert "fix_mismatches" in step_names
     assert "clean_text" in step_names
@@ -251,7 +251,7 @@ def test_pipeline_report_step_is_read_only(multidj_db, cfg, tmp_path):
         cfg=cfg,
         apply=True,
         music_dir=None,
-        skip={"import", "fix_mismatches", "parse", "bpm", "key", "energy", "genres", "clean_text", "crates", "sync"},
+        skip={"import", "fix_mismatches", "parse", "dedupe", "bpm", "key", "energy", "genres", "clean_text", "crates", "sync"},
         report_output=str(report_path),
         backup_dir=False,
     )
