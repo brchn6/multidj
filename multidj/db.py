@@ -67,7 +67,14 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
             conn.execute("UPDATE schema_version SET version = ?", (n,))
             conn.commit()
         except Exception as exc:
-            raise RuntimeError(f"Migration {script.name} failed: {exc}") from exc
+            # "duplicate column name" means ALTER TABLE ADD COLUMN for a column
+            # that already exists — the desired end state is already present,
+            # so treat this as a successful no-op and advance the version.
+            if "duplicate column name" in str(exc).lower():
+                conn.execute("UPDATE schema_version SET version = ?", (n,))
+                conn.commit()
+            else:
+                raise RuntimeError(f"Migration {script.name} failed: {exc}") from exc
 
 
 @contextmanager

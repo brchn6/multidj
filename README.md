@@ -18,41 +18,68 @@ uv sync --extra analysis
 
 The `analysis` extra enables BPM, key, and energy detection in analyze commands.
 
-## Quick start
+## How MultiDJ uses two databases
+
+MultiDJ keeps **its own database** separate from Mixxx:
+
+| Database | Default path | Purpose |
+|---|---|---|
+| **MultiDJ DB** | `~/.multidj/library.sqlite` | Source of truth — all metadata, crates, BPM/key/energy |
+| **Mixxx DB** | `~/.mixxx/mixxxdb.sqlite` | Read on import; written to on sync |
+
+You never pass the Mixxx DB as `--db`. The `--db` flag (or `multidj config set-db`) always refers to the MultiDJ DB.
+
+## First-time setup
 
 ```bash
-# One-time: import your Mixxx library into MultiDJ
+# 1. Import your Mixxx library into the MultiDJ DB (reads Mixxx, writes to ~/.multidj/library.sqlite)
 multidj import mixxx --apply
 
-# Or import directly from your music folder (no Mixxx required)
-multidj import directory ~/Music/All_Tracks --apply
-
-# Run the full pipeline: import new tracks → analyze → rebuild crates → sync to Mixxx
-multidj pipeline --apply
-
-# Push everything back to Mixxx (tracks + crates)
-multidj sync mixxx --apply
+# 2. (Optional) Store your Mixxx DB path in config so --mixxx-db is automatic
+multidj config set-db ~/.multidj/library.sqlite   # only needed if you want a non-default path
 ```
+
+If you don't use Mixxx, import directly from your music folder:
+
+```bash
+multidj import directory ~/Music/All_Tracks --apply
+```
+
+## Daily workflow
+
+```bash
+# Full pipeline: import new tracks → clean → analyze → rebuild crates → sync to Mixxx
+multidj pipeline --apply \
+  --music-dir ~/Music/All_Tracks \
+  --mixxx-db ~/.mixxx/mixxxdb.sqlite
+
+# Dry-run first to preview what would change
+multidj pipeline \
+  --music-dir ~/Music/All_Tracks \
+  --mixxx-db ~/.mixxx/mixxxdb.sqlite
+```
+
+`--music-dir` and `--mixxx-db` are both optional:
+- Omit `--music-dir` to skip the directory import step
+- Omit `--mixxx-db` to skip the Mixxx sync step
 
 ## The pipeline
 
-`multidj pipeline` is the primary daily workflow command. It chains all steps in order:
+`multidj pipeline` chains all steps in order:
 
 ```
-import directory → fix mismatches → parse → analyze bpm → analyze key → analyze energy
+import directory → fix mismatches → parse → dedupe
+→ analyze bpm → analyze key → analyze energy
 → clean genres → clean text → crates rebuild → sync mixxx → report
 ```
 
 ```bash
-multidj pipeline              # dry-run: preview all steps
 multidj pipeline --apply      # execute everything
+multidj pipeline              # dry-run: preview without writing
 
 # Skip individual steps
 multidj pipeline --apply --skip-bpm --skip-key
 multidj pipeline --apply --skip-sync   # rebuild crates without touching Mixxx
-
-# Analyze from a specific directory this run
-multidj pipeline --apply --music-dir /Volumes/USB/NewPurchases
 
 # Write report to custom path
 multidj pipeline --apply --report-output /path/to/report.html
