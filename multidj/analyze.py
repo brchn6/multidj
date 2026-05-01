@@ -16,7 +16,9 @@ def detect_key(filepath: str) -> str:
         import librosa  # type: ignore
         import numpy as np  # type: ignore
     except ImportError:
-        raise ImportError("Key analysis requires: pip install librosa mutagen")
+        raise RuntimeError(
+            "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
+        )
 
     KS_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
     KS_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
@@ -38,7 +40,9 @@ def _write_tag(filepath: str, key: str) -> None:
     try:
         import mutagen  # type: ignore  # noqa: F401
     except ImportError:
-        raise ImportError("Key analysis requires: pip install librosa mutagen")
+        raise RuntimeError(
+            "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
+        )
 
     import mutagen.id3 as id3  # type: ignore
     import mutagen.flac as flac_mod  # type: ignore
@@ -68,7 +72,9 @@ def detect_energy(filepath: str) -> float:
         import librosa  # type: ignore
         import numpy as np  # type: ignore
     except ImportError:
-        raise ImportError("Energy analysis requires: pip install librosa")
+        raise RuntimeError(
+            "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
+        )
 
     y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
     rms = float(np.mean(librosa.feature.rms(y=y)))
@@ -87,7 +93,9 @@ def detect_bpm_profile(filepath: str, window_seconds: float = 30.0) -> dict[str,
     try:
         import librosa  # type: ignore
     except ImportError:
-        raise ImportError("BPM analysis requires: pip install librosa")
+        raise RuntimeError(
+            "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
+        )
 
     # Use track duration to sample three windows across the file.
     duration = float(librosa.get_duration(path=filepath))

@@ -7,14 +7,16 @@ Designed for agent-operated workflows: JSON output, dry-run defaults, per-track 
 ## Install
 
 ```bash
-pip install -e .
+uv sync
 multidj --help
 ```
 
 Optional audio analysis (BPM, key, energy detection):
 ```bash
-pip install librosa mutagen
+uv sync --extra analysis
 ```
+
+The `analysis` extra enables BPM, key, and energy detection in analyze commands.
 
 ## Quick start
 
@@ -195,7 +197,7 @@ multidj clean text               # dry-run: clean artist/title/album text + remo
 multidj clean text --apply
 ```
 
-### Analyze (requires `pip install librosa mutagen`)
+### Analyze (requires `uv sync --extra analysis`)
 
 ```bash
 multidj analyze bpm              # dry-run: list tracks needing BPM

@@ -24,7 +24,9 @@ SUPPORTED_EXTENSIONS = frozenset(
 def _read_tags(filepath: str) -> dict[str, Any]:
     """Read embedded tags from an audio file using mutagen Easy tags."""
     if MutagenFile is None:
-        raise ImportError("Directory import requires: pip install mutagen")
+        raise RuntimeError(
+            "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
+        )
 
     audio = MutagenFile(filepath, easy=True)
     if audio is None:

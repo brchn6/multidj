@@ -13,9 +13,18 @@ dependencies = [
     "tomli>=2.0; python_version < '3.11'",
 ]
 
+[project.optional-dependencies]
+analysis = [
+    "librosa>=0.11.0",
+    "mutagen>=1.47",
+]
+
 [project.scripts]
 multidj = "multidj.cli:main"
 mixxx-tool = "multidj.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
 
 [tool.setuptools]
 package-dir = {"" = "."}
