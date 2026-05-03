@@ -28,12 +28,13 @@ def create_backup(db_path: str | None = None, backup_dir: str | None = None) -> 
     target_dir = Path(backup_dir).expanduser() if backup_dir else DEFAULT_BACKUP_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    now = datetime.now()
+    ts = now.strftime("%Y%m%d_%H%M%S")
     backup_path = target_dir / f"{source.name}.{ts}.backup"
     shutil.copy2(source, backup_path)
 
     return BackupResult(
         source=str(source),
         backup_path=str(backup_path),
-        created_at=datetime.now().isoformat(timespec="seconds"),
+        created_at=now.isoformat(timespec="seconds"),
     )

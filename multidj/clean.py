@@ -188,7 +188,7 @@ def _split_multi_value_tokens(genre_norm: str) -> list[str]:
 
 def _contains_junk_token(genre_norm: str) -> bool:
     for token in SUSPICIOUS_GENRE_JUNK_TOKENS:
-        if re.search(rf"\\b{re.escape(token)}\\b", genre_norm):
+        if re.search(rf"\b{re.escape(token)}\b", genre_norm):
             return True
     return any(token in genre_norm for token in HEBREW_METADATA_TOKENS)
 
@@ -318,6 +318,7 @@ def clean_text(
     apply: bool = False,
     limit: int | None = None,
     backup: bool = True,
+    backup_dir: str | None = None,
 ) -> dict[str, Any]:
     mode = "apply" if apply else "dry_run"
 
@@ -399,7 +400,7 @@ def clean_text(
 
     if apply and planned:
         if backup:
-            create_backup(db_path)
+            create_backup(db_path, backup_dir=backup_dir)
         with connect(db_path, readonly=False) as conn:
             for change in planned:
                 track_id = change["track_id"]

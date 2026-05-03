@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Any
 
 from .analyze import analyze_bpm, analyze_energy, analyze_key
@@ -54,7 +55,9 @@ def run_pipeline(
 
     # One backup at the start — not per step
     if apply and backup_dir is not False:
-        create_backup(db_path, backup_dir=backup_dir)
+        resolved = Path(db_path).expanduser() if db_path else Path("~/.multidj/library.sqlite").expanduser()
+        if resolved.exists():
+            create_backup(db_path, backup_dir=backup_dir)
 
     def _run_step(name: str, fn, **kwargs) -> dict[str, Any]:
         if name in skip:
@@ -147,7 +150,7 @@ def run_pipeline(
     else:
         steps.append({"step": "sync", "status": "skipped", "reason": "mixxx_db_path not set"})
 
-    # Step 11: Generate HTML report (read-only)
+    # Step 12: Generate HTML report (read-only)
     def _report_step() -> dict[str, Any]:
         from .report import write_html_report
 

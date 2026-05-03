@@ -406,10 +406,7 @@ class MixxxAdapter(SyncAdapter):
         from ..db import resolve_db_path
         multidj_db_path = resolve_db_path(str(multidj_db_path) if multidj_db_path else None)
 
-        # Open MultiDJ DB to read dirty tracks
-        mdj_conn = sqlite3.connect(str(multidj_db_path))
-        mdj_conn.row_factory = sqlite3.Row
-        try:
+        with connect(str(multidj_db_path), readonly=True) as mdj_conn:
             dirty_rows = mdj_conn.execute(
                 """
                 SELECT t.id, t.path, t.artist, t.title, t.album, t.genre, t.bpm,
@@ -419,10 +416,6 @@ class MixxxAdapter(SyncAdapter):
                 WHERE ss.adapter='mixxx' AND ss.dirty=1 AND t.deleted=0
                 """
             ).fetchall()
-        finally:
-            if not apply:
-                mdj_conn.close()
-                mdj_conn = None
 
         dirty_tracks = [dict(r) for r in dirty_rows]
 
@@ -445,35 +438,35 @@ class MixxxAdapter(SyncAdapter):
         # Open Mixxx DB writable
         mixxx_conn = sqlite3.connect(str(self.mixxx_path))
         try:
-            for track in dirty_tracks:
-                path = track.get("path")
-                try:
-                    success = self.push_track(track, mixxx_conn)
-                    if success:
-                        mixxx_conn.commit()
-                        # Mark clean in MultiDJ
-                        mdj_conn.execute(
-                            """
-                            UPDATE sync_state SET dirty=0, last_synced_at=?
-                            WHERE track_id=? AND adapter='mixxx'
-                            """,
-                            (now_iso, track["id"]),
-                        )
-                        mdj_conn.commit()
-                        pushed += 1
-                    else:
-                        errors.append({"path": path, "reason": "path not found in Mixxx"})
-                except Exception as exc:  # noqa: BLE001
+            with connect(str(multidj_db_path), readonly=False) as mdj_conn:
+                for track in dirty_tracks:
+                    path = track.get("path")
                     try:
-                        mixxx_conn.rollback()
-                    except Exception:
-                        pass
-                    errors.append({"path": path, "reason": str(exc)})
-            crate_result = _push_crates_to_mixxx(mdj_conn, mixxx_conn)
-            mixxx_conn.commit()
+                        success = self.push_track(track, mixxx_conn)
+                        if success:
+                            mixxx_conn.commit()
+                            # Mark clean in MultiDJ
+                            mdj_conn.execute(
+                                """
+                                UPDATE sync_state SET dirty=0, last_synced_at=?
+                                WHERE track_id=? AND adapter='mixxx'
+                                """,
+                                (now_iso, track["id"]),
+                            )
+                            mdj_conn.commit()
+                            pushed += 1
+                        else:
+                            errors.append({"path": path, "reason": "path not found in Mixxx"})
+                    except Exception as exc:  # noqa: BLE001
+                        try:
+                            mixxx_conn.rollback()
+                        except Exception:
+                            pass
+                        errors.append({"path": path, "reason": str(exc)})
+                crate_result = _push_crates_to_mixxx(mdj_conn, mixxx_conn)
+                mixxx_conn.commit()
         finally:
             mixxx_conn.close()
-            mdj_conn.close()
 
         return {
             "mode":               "apply",

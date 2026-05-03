@@ -272,16 +272,14 @@ def rebuild_crates(
         hebrew_ids = [r["id"] for r in all_tracks
                       if is_hebrew(r["title"]) or is_hebrew(r["artist"])]
 
-        # --- track id lookup by genre ---
+        # --- track id lookup by genre (single query, group in Python) ---
+        genre_tracks = conn.execute("""
+            SELECT id, genre FROM tracks
+            WHERE deleted = 0 AND genre IS NOT NULL AND TRIM(genre) != ''
+        """).fetchall()
         genre_track_map: dict[str, list[int]] = {}
-        for g in genre_groups:
-            track_ids = [
-                r["id"] for r in conn.execute("""
-                    SELECT id FROM tracks
-                    WHERE deleted = 0 AND genre = ?
-                """, (g["genre"],)).fetchall()
-            ]
-            genre_track_map[g["genre"]] = track_ids
+        for row in genre_tracks:
+            genre_track_map.setdefault(row["genre"], []).append(row["id"])
 
     # Build crates-to-create list
     crates_to_create: list[dict[str, Any]] = []

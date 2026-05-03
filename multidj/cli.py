@@ -25,7 +25,7 @@ from .utils import emit
 
 
 def _hoist_global_flags(argv: list[str]) -> list[str]:
-    """Move --json and --db <val> before the first positional (subcommand) token."""
+    """Move --json, --db <val>, and --dry-run before the first positional (subcommand) token."""
     global_flags: list[str] = []
     rest: list[str] = []
     i = 0
@@ -35,6 +35,8 @@ def _hoist_global_flags(argv: list[str]) -> list[str]:
         elif argv[i] == "--db" and i + 1 < len(argv):
             global_flags += [argv[i], argv[i + 1]]
             i += 1
+        elif argv[i] == "--dry-run":
+            global_flags.append(argv[i])
         else:
             rest.append(argv[i])
         i += 1
@@ -98,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", help="Path to MultiDJ SQLite database (default: ~/.multidj/library.sqlite)")
     parser.add_argument("--json", action="store_true", help="Emit JSON output")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing (default behavior)")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
