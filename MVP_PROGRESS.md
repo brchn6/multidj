@@ -203,3 +203,7 @@ multidj enrich language
 - Added `multidj report dashboard` for standalone interactive HTML dashboard output with optional `--output` path.
 - Pipeline report step now generates the interactive dashboard by default while remaining read-only and non-fatal.
 - Added experimental Camelot harmonic transition analysis/visualization in crate views (UI-only interactions, no DB persistence).
+
+## Repository Sync Note (2026-05-05)
+
+- `sync mixxx` key handling fixed: writes Camelot string directly to `library.key` (VARCHAR(8)) instead of looking up a non-existent `keys` table. Previous versions assumed a `keys` table with `key_text` column and `key_id` FK on `library`, which doesn't exist in modern Mixxx installs. Now pushes keys directly, resolving the `no such table: keys` error that blocked all track syncs.

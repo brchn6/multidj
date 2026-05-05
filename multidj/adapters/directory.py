@@ -75,9 +75,12 @@ class DirectoryAdapter(SyncAdapter):
         apply: bool = False,
         paths: list[str] | None = None,
         backup_dir: str | None = None,
+        limit: int | None = None,
     ) -> dict[str, Any]:
         paths = paths or []
         audio_files = _walk_audio_files(paths)
+        if limit is not None:
+            audio_files = audio_files[:limit]
 
         if not apply:
             return {

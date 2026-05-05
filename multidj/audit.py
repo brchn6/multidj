@@ -193,6 +193,7 @@ def fix_mismatches(
     db_path: str | None = None,
     apply: bool = False,
     backup: bool = False,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Detect and optionally correct artist/title swap mismatches across all active tracks.
 
@@ -235,12 +236,17 @@ def fix_mismatches(
         })
 
     if apply and fixes:
+        if limit is not None:
+            fixes = fixes[:limit]
         with connect(db_path, readonly=False) as conn:
             conn.executemany(
                 "UPDATE tracks SET artist=?, title=? WHERE id=?",
                 [(f["new_artist"], f["new_title"], f["track_id"]) for f in fixes],
             )
             conn.commit()
+
+    if not apply and limit is not None:
+        fixes = fixes[:limit]
 
     return {
         "mode": "apply" if apply else "dry_run",

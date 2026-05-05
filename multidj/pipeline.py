@@ -27,6 +27,7 @@ def run_pipeline(
     report_output: str | None = None,
     skip_report: bool = False,
     backup_dir: str | None | bool = None,  # False = suppress backup (sentinel)
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Run the full MultiDJ pipeline: import → parse → dedupe → bpm → key → energy → genres → crates → sync.
 
@@ -81,6 +82,7 @@ def run_pipeline(
         steps.append(_run_step(
             "import", adapter.import_all,
             multidj_db_path=db_path, apply=apply, paths=[music_dir],
+            limit=limit,
         ))
     else:
         steps.append({"step": "import", "status": "skipped", "reason": "music_dir not set"})
@@ -89,57 +91,69 @@ def run_pipeline(
     steps.append(_run_step(
         "fix_mismatches", fix_mismatches,
         db_path=db_path, apply=apply, backup=False,
+        limit=limit,
     ))
 
     # Step 3: Parse filenames
     steps.append(_run_step(
         "parse", parse_library,
         db_path=db_path, apply=apply, backup=False,
+        limit=limit,
     ))
 
     # Step 4: Deduplicate tracks (before analysis to avoid wasted compute)
     steps.append(_run_step(
         "dedupe", _dedupe,
         db_path=db_path, apply=apply, backup=False,
+        limit=limit,
     ))
 
     # Step 5: Detect BPM
     steps.append(_run_step(
         "bpm", analyze_bpm,
         db_path=db_path, apply=apply, backup_dir=False,
+        limit=limit,
     ))
 
-    # Step 6: Detect key (analyze_key has no backup_dir param — it never creates backups)
+    # Step 6: Detect key
     steps.append(_run_step(
         "key", analyze_key,
         db_path=db_path, apply=apply,
+        limit=limit,
     ))
 
     # Step 7: Detect energy
     steps.append(_run_step(
         "energy", analyze_energy,
         db_path=db_path, apply=apply, backup_dir=False,
+        limit=limit,
     ))
 
     # Step 8: Normalize genres
     steps.append(_run_step(
         "genres", clean_genres,
         db_path=db_path, apply=apply, backup=False,
+        limit=limit,
     ))
 
     # Step 9: Clean artist/title/album text noise
     steps.append(_run_step(
         "clean_text", clean_text,
         db_path=db_path, apply=apply, backup=False,
+        limit=limit,
     ))
 
-    # Step 10: Rebuild crates
+    # Step 10: Rebuild crates (limit not applicable — full rebuild)
+    if limit is not None:
+        _log(f"[pipeline:crates] --limit ignored (crates require full rebuild)")
     steps.append(_run_step(
         "crates", rebuild_crates,
         db_path=db_path, apply=apply, backup=False, cfg=cfg,
     ))
 
-    # Step 11: Sync to Mixxx
+    # Step 11: Sync to Mixxx (limit not applicable — full sync)
+    if limit is not None and mixxx_db_path:
+        _log(f"[pipeline:sync] --limit ignored (sync pushes all dirty tracks)")
     if mixxx_db_path:
         from .adapters.mixxx import MixxxAdapter
         mx_adapter = MixxxAdapter(mixxx_db_path=mixxx_db_path)
