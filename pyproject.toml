@@ -32,3 +32,6 @@ package-dir = {"" = "."}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["multidj*"]
+
+[tool.setuptools.package-data]
+multidj = ["assets/*.lua"]
