@@ -29,7 +29,7 @@ def run_pipeline(
     backup_dir: str | None | bool = None,  # False = suppress backup (sentinel)
     limit: int | None = None,
 ) -> dict[str, Any]:
-    """Run the full MultiDJ pipeline: import → parse → dedupe → bpm → key → energy → genres → crates → sync.
+    """Run the full MultiDJ pipeline: import → parse → dedupe → bpm → key → energy → cues → genres → crates → sync.
 
     Steps run sequentially. One failure does not abort remaining steps.
     Config toggles auto-skip analysis steps for disabled crate dimensions.
@@ -51,6 +51,8 @@ def run_pipeline(
         skip = skip | {"fix_mismatches"}
     if not cfg.get("pipeline", {}).get("clean_text", True):
         skip = skip | {"clean_text"}
+    if not cfg.get("pipeline", {}).get("cues", True):
+        skip = skip | {"cues"}
     if skip_report:
         skip = skip | {"report"}
 
@@ -129,21 +131,35 @@ def run_pipeline(
         limit=limit,
     ))
 
-    # Step 8: Normalize genres
+    # Step 8: Detect structural cues (requires embeddings extra)
+    def _run_cues(**kwargs):
+        try:
+            from .cues import analyze_cues as _ac
+            return _ac(**kwargs)
+        except ImportError:
+            raise RuntimeError("embeddings extra not installed; run: uv sync --extra embeddings")
+
+    steps.append(_run_step(
+        "cues", _run_cues,
+        db_path=db_path, apply=apply, backup_dir=False,
+        limit=limit,
+    ))
+
+    # Step 9: Normalize genres
     steps.append(_run_step(
         "genres", clean_genres,
         db_path=db_path, apply=apply, backup=False,
         limit=limit,
     ))
 
-    # Step 9: Clean artist/title/album text noise
+    # Step 10: Clean artist/title/album text noise
     steps.append(_run_step(
         "clean_text", clean_text,
         db_path=db_path, apply=apply, backup=False,
         limit=limit,
     ))
 
-    # Step 10: Rebuild crates (limit not applicable — full rebuild)
+    # Step 11: Rebuild crates (limit not applicable — full rebuild)
     if limit is not None:
         _log(f"[pipeline:crates] --limit ignored (crates require full rebuild)")
     steps.append(_run_step(
@@ -151,7 +167,7 @@ def run_pipeline(
         db_path=db_path, apply=apply, backup=False, cfg=cfg,
     ))
 
-    # Step 11: Sync to Mixxx (limit not applicable — full sync)
+    # Step 12: Sync to Mixxx (limit not applicable — full sync)
     if limit is not None and mixxx_db_path:
         _log(f"[pipeline:sync] --limit ignored (sync pushes all dirty tracks)")
     if mixxx_db_path:
@@ -164,7 +180,7 @@ def run_pipeline(
     else:
         steps.append({"step": "sync", "status": "skipped", "reason": "mixxx_db_path not set"})
 
-    # Step 12: Generate HTML report (read-only)
+    # Step 13: Generate HTML report (read-only)
     def _report_step() -> dict[str, Any]:
         from .report import write_html_report
 

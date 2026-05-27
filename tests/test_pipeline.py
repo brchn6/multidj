@@ -36,7 +36,7 @@ def test_dry_run_returns_step_summaries(multidj_db, mixxx_db, cfg, tmp_path):
     )
     assert result["mode"] == "dry_run"
     assert "steps" in result
-    assert len(result["steps"]) == 12
+    assert len(result["steps"]) == 13
     step_names = [s["step"] for s in result["steps"]]
     assert "fix_mismatches" in step_names
     assert "clean_text" in step_names
@@ -251,7 +251,7 @@ def test_pipeline_report_step_is_read_only(multidj_db, cfg, tmp_path):
         cfg=cfg,
         apply=True,
         music_dir=None,
-        skip={"import", "fix_mismatches", "parse", "dedupe", "bpm", "key", "energy", "genres", "clean_text", "crates", "sync"},
+        skip={"import", "fix_mismatches", "parse", "dedupe", "bpm", "key", "energy", "cues", "genres", "clean_text", "crates", "sync"},
         report_output=str(report_path),
         backup_dir=False,
     )
@@ -283,3 +283,51 @@ def test_pipeline_report_failure_does_not_abort_pipeline(multidj_db, mixxx_db, c
     report_step = next(s for s in result["steps"] if s["step"] == "report")
     assert report_step["status"] == "error"
     assert "report failed" in report_step["error"]
+
+
+def test_pipeline_includes_cues_step(multidj_db, tmp_path):
+    """cues step appears in pipeline results."""
+    from multidj.pipeline import run_pipeline
+    from unittest.mock import patch
+
+    with patch("multidj.cues.detect_cues", return_value=[]):
+        result = run_pipeline(
+            db_path=str(multidj_db),
+            apply=False,
+            skip=set(),
+        )
+
+    step_names = [s["step"] for s in result["steps"]]
+    assert "cues" in step_names
+
+
+def test_pipeline_skip_cues(multidj_db, tmp_path):
+    """--skip-cues omits the step."""
+    from multidj.pipeline import run_pipeline
+
+    result = run_pipeline(
+        db_path=str(multidj_db),
+        apply=False,
+        skip={"cues"},
+    )
+
+    cues_step = next(s for s in result["steps"] if s["step"] == "cues")
+    assert cues_step["status"] == "skipped"
+
+
+def test_pipeline_cues_after_energy(multidj_db):
+    """cues step comes immediately after energy in the pipeline."""
+    from multidj.pipeline import run_pipeline
+    from unittest.mock import patch
+
+    with patch("multidj.cues.detect_cues", return_value=[]):
+        result = run_pipeline(
+            db_path=str(multidj_db),
+            apply=False,
+            skip=set(),
+        )
+
+    step_names = [s["step"] for s in result["steps"]]
+    energy_idx = step_names.index("energy")
+    cues_idx = step_names.index("cues")
+    assert cues_idx == energy_idx + 1
