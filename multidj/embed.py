@@ -114,3 +114,68 @@ def _encode_audio_file(filepath: str, model: Any, processor: Any, device: str) -
         embeddings.append(feat[0].cpu().numpy())
 
     return np.mean(embeddings, axis=0)
+
+
+def analyze_embed(
+    db_path: str | None = None,
+    apply: bool = False,
+    force: bool = False,
+    limit: int | None = None,
+    backup_dir: str | None | bool = None,
+) -> dict[str, Any]:
+    with connect(db_path, readonly=True) as conn:
+        ensure_not_empty(conn)
+        if force:
+            rows = conn.execute(
+                "SELECT id, path FROM tracks WHERE deleted=0 ORDER BY id"
+            ).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT t.id, t.path
+                FROM tracks t
+                LEFT JOIN embeddings e ON t.id = e.track_id
+                WHERE t.deleted = 0 AND e.track_id IS NULL
+                ORDER BY t.id
+            """).fetchall()
+
+    candidates = [{"id": r["id"], "path": r["path"]} for r in rows]
+    if limit is not None:
+        candidates = candidates[:limit]
+    total = len(candidates)
+
+    _progress(f"analyze embed — {total} track(s) to embed (model: {MODEL_NAME})")
+
+    if not apply:
+        return {
+            "mode": "dry_run",
+            "total_candidates": total,
+            "processed": 0,
+            "succeeded": 0,
+            "errors": 0,
+            "model": MODEL_NAME,
+        }
+
+    model, processor, device = load_clap_model()
+    succeeded = errors = 0
+
+    with connect(db_path, readonly=False) as conn:
+        for i, row in enumerate(candidates):
+            _progress(f"  [{i + 1}/{total}] {Path(row['path']).name}", end="\r")
+            try:
+                vec = _encode_audio_file(row["path"], model, processor, device)
+                store_embedding(conn, row["id"], MODEL_NAME, vec)
+                conn.commit()
+                succeeded += 1
+            except Exception as exc:
+                _progress(f"\n  ERROR: {exc}")
+                errors += 1
+
+    _progress("")
+    return {
+        "mode": "apply",
+        "total_candidates": total,
+        "processed": total,
+        "succeeded": succeeded,
+        "errors": errors,
+        "model": MODEL_NAME,
+    }

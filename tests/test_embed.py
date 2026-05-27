@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import patch
 
 from tests.fixtures.multidj_factory import make_multidj_db
-from multidj.embed import store_embedding, _blob_to_vec
+from multidj.embed import store_embedding, _blob_to_vec, analyze_embed
 from multidj.db import connect
 
 
@@ -57,3 +57,79 @@ def test_store_embedding_upserts(db):
     raw.close()
     assert count == 1  # upsert, not insert
     np.testing.assert_allclose(_blob_to_vec(row[0])[0], 9.9, rtol=1e-4)
+
+
+def _stub_load_clap():
+    return object(), object(), "cpu"
+
+
+def _stub_encode(path, model, processor, device):
+    return FIXED_VEC.copy()
+
+
+def test_dry_run_returns_candidate_count(db):
+    result = analyze_embed(db_path=str(db), apply=False)
+    assert result["mode"] == "dry_run"
+    assert result["total_candidates"] > 0
+    assert result["processed"] == 0
+    assert result["succeeded"] == 0
+
+
+def test_dry_run_does_not_write(db):
+    analyze_embed(db_path=str(db), apply=False)
+    raw = sqlite3.connect(str(db))
+    count = raw.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+    raw.close()
+    assert count == 0
+
+
+def test_apply_stores_embeddings(db, tmp_path):
+    with patch("multidj.embed.load_clap_model", _stub_load_clap), \
+         patch("multidj.embed._encode_audio_file", _stub_encode):
+        result = analyze_embed(db_path=str(db), apply=True, backup_dir=str(tmp_path))
+    assert result["mode"] == "apply"
+    assert result["succeeded"] > 0
+    raw = sqlite3.connect(str(db))
+    count = raw.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+    raw.close()
+    assert count == result["succeeded"]
+
+
+def test_incremental_skips_already_embedded(db, tmp_path):
+    with patch("multidj.embed.load_clap_model", _stub_load_clap), \
+         patch("multidj.embed._encode_audio_file", _stub_encode):
+        analyze_embed(db_path=str(db), apply=True, backup_dir=str(tmp_path))
+    result2 = analyze_embed(db_path=str(db), apply=False)
+    assert result2["total_candidates"] == 0
+
+
+def test_force_re_embeds_existing(db, tmp_path):
+    with patch("multidj.embed.load_clap_model", _stub_load_clap), \
+         patch("multidj.embed._encode_audio_file", _stub_encode):
+        analyze_embed(db_path=str(db), apply=True, backup_dir=str(tmp_path))
+    result3 = analyze_embed(db_path=str(db), apply=False, force=True)
+    assert result3["total_candidates"] > 0
+
+
+def test_per_track_error_isolation(db, tmp_path):
+    call_count = 0
+
+    def flaky(path, model, processor, device):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("bad audio")
+        return FIXED_VEC.copy()
+
+    with patch("multidj.embed.load_clap_model", _stub_load_clap), \
+         patch("multidj.embed._encode_audio_file", flaky):
+        result = analyze_embed(db_path=str(db), apply=True, backup_dir=str(tmp_path))
+    assert result["errors"] >= 1
+    assert result["succeeded"] >= 1
+
+
+def test_limit_restricts_processed(db, tmp_path):
+    with patch("multidj.embed.load_clap_model", _stub_load_clap), \
+         patch("multidj.embed._encode_audio_file", _stub_encode):
+        result = analyze_embed(db_path=str(db), apply=True, limit=1, backup_dir=str(tmp_path))
+    assert result["processed"] == 1
