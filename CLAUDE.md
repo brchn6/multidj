@@ -19,6 +19,10 @@ multidj import mixxx --apply   # one-time: populate MultiDJ DB from Mixxx
 multidj pipeline --apply       # daily workflow: import→parse→analyze→crates→sync
 multidj <command>              # primary entry point
 mixxx-tool <command>           # legacy alias (same binary)
+# Optional: mpv media player (required for `multidj triage`)
+# Fedora/RHEL: sudo dnf install mpv
+# Ubuntu/Debian: sudo apt install mpv
+# macOS: brew install mpv
 ```
 
 Override the DB path: `--db <path>` flag or `MULTIDJ_DB_PATH` environment variable.
@@ -48,6 +52,7 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 | `crates hide/show/delete` | Bulk crate management |
 | `crates rebuild` | Rebuild all auto-crates (Genre:/BPM:/Key:/Energy:/Lang:) from config; `--apply`, `--min-tracks` |
 | `dedupe` | Duplicate detection (artist+title or filesize+duration) |
+| `triage` | Keyboard-driven track audition via mpv: KP0=soft-delete, Shift+KP0=hard-delete (rm file), KP1–5=rating, n=skip, ←/→=±30s; `--crate NAME`, `--limit N` (requires mpv) |
 
 **Global flags** (accepted anywhere in the command line): `--json`, `--db <path>`, `--version`
 

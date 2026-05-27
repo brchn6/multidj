@@ -44,6 +44,7 @@
 - [x] `crates delete` — permanent delete of auto crates + their track assignments, `--apply`
 - [x] `crates rebuild` — delete all auto-crates, recreate from current DB; config-driven dimensions: Genre:/Lang:/BPM:/Key:/Energy:; `--min-tracks`, `--apply`
 - [x] `dedupe` — artist+title and filesize+duration matching; keeper = most-played → highest-rated → largest; `--by`, `--apply`
+- [x] `triage` — mpv-based keyboard audition: KP0=soft-delete, Shift+KP0=hard-delete (rm file), KP1–5=rating, n=skip; `--crate`, `--limit`; `triage tag --hard-delete` write subcommand called by Lua
 - [x] `parse` — extract artist/title/remixer/featuring from filenames; confidence tiers (high/medium/low); `--apply`, `--force`, `--min-confidence`, `--limit`
 - [x] `enrich language` — detect Hebrew tracks by Unicode range (U+0590–U+05FF, U+FB1D–U+FB4F); read-only report
 
@@ -95,6 +96,7 @@
 | 13 | **Playlist builder** — constraint-based sequencing (mood + BPM arc + Camelot harmonic flow) | Planned |
 | 14 | **MCP embedding/playlist tools** — expose similarity + playlist building as agent tools | Planned |
 | 15 | **Natural language DJ** — "build me a 2am dark techno set" via LLM → playlist | Vision |
+| 16 | **Triage player** — `multidj triage` mpv + Lua keyboard-driven track audition; KP0=soft-delete, Shift+KP0=hard-delete, KP1–5=rating | **Done** |
 
 ---
 
