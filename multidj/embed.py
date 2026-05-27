@@ -107,11 +107,11 @@ def _encode_audio_file(filepath: str, model: Any, processor: Any, device: str) -
         w = y[start : start + window]
         if len(w) < window:
             w = np.pad(w, (0, window - len(w)))
-        inputs = processor(audios=w, sampling_rate=_SR, return_tensors="pt", padding=True)
+        inputs = processor(audio=w, sampling_rate=_SR, return_tensors="pt", padding=True)
         inputs = {k: v.to(device) for k, v in inputs.items()}
         with torch.no_grad():
             feat = model.get_audio_features(**inputs)
-        embeddings.append(feat[0].cpu().numpy())
+        embeddings.append(feat.pooler_output[0].cpu().numpy())
 
     return np.mean(embeddings, axis=0)
 
@@ -123,6 +123,9 @@ def analyze_embed(
     limit: int | None = None,
     backup_dir: str | None | bool = None,
 ) -> dict[str, Any]:
+    # Ensure migration 004 (embeddings table) is applied before reading.
+    with connect(db_path, readonly=False) as _:
+        pass
     with connect(db_path, readonly=True) as conn:
         ensure_not_empty(conn)
         if force:
