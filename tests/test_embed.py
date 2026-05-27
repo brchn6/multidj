@@ -148,3 +148,48 @@ def test_cli_analyze_embed_apply(db, tmp_path):
          patch("multidj.embed._encode_audio_file", _stub_encode):
         ret = cli_main(["--db", str(db), "analyze", "embed", "--apply"])
     assert ret == 0
+
+
+from multidj.embed import find_similar
+
+
+def test_find_similar_returns_ordered_results(tmp_path):
+    db = make_multidj_db(tmp_path / "library.sqlite")
+    with connect(str(db), readonly=True) as conn:
+        track_rows = conn.execute(
+            "SELECT id, path FROM tracks WHERE deleted=0 ORDER BY id"
+        ).fetchall()
+    track_ids = [r["id"] for r in track_rows]
+    track_paths = [r["path"] for r in track_rows]
+
+    query_vec = np.zeros(512, dtype=np.float32)
+    query_vec[0] = 1.0
+
+    similar_vec = np.zeros(512, dtype=np.float32)
+    similar_vec[0] = 0.9
+    similar_vec[1] = 0.1
+
+    dissimilar_vec = np.zeros(512, dtype=np.float32)
+    dissimilar_vec[256] = 1.0
+
+    with connect(str(db), readonly=False) as conn:
+        store_embedding(conn, track_ids[0], "test", query_vec)
+        store_embedding(conn, track_ids[1], "test", similar_vec)
+        for tid in track_ids[2:]:
+            store_embedding(conn, tid, "test", dissimilar_vec)
+        conn.commit()
+
+    result = find_similar(db_path=str(db), track_ref=track_paths[0], top_n=3)
+
+    assert result["query_track"]["id"] == track_ids[0]
+    assert len(result["similar"]) == 3
+    assert result["similar"][0]["id"] == track_ids[1]
+    distances = [r["distance"] for r in result["similar"]]
+    assert distances == sorted(distances)
+
+
+def test_find_similar_raises_when_no_embedding(db):
+    with connect(str(db), readonly=True) as conn:
+        path = conn.execute("SELECT path FROM tracks WHERE deleted=0 LIMIT 1").fetchone()["path"]
+    with pytest.raises(RuntimeError, match="no embedding"):
+        find_similar(db_path=str(db), track_ref=path)

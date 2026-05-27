@@ -179,3 +179,66 @@ def analyze_embed(
         "errors": errors,
         "model": MODEL_NAME,
     }
+
+
+def find_similar(
+    db_path: str | None = None,
+    track_ref: str = "",
+    top_n: int = 10,
+) -> dict[str, Any]:
+    """Return the top_n most similar tracks by cosine distance in embedding space."""
+    with connect(db_path, readonly=True) as conn:
+        ensure_not_empty(conn)
+
+        row = conn.execute(
+            "SELECT id, artist, title, path FROM tracks WHERE path = ? AND deleted = 0",
+            (track_ref,),
+        ).fetchone()
+        if not row:
+            row = conn.execute(
+                "SELECT id, artist, title, path FROM tracks"
+                " WHERE deleted = 0 AND (COALESCE(artist,'') || ' - ' || COALESCE(title,'')) LIKE ?"
+                " LIMIT 1",
+                (f"%{track_ref}%",),
+            ).fetchone()
+        if not row:
+            raise RuntimeError(f"Track not found: {track_ref!r}")
+
+        query_id = row["id"]
+        query_info = {"id": query_id, "artist": row["artist"], "title": row["title"]}
+
+        emb_row = conn.execute(
+            "SELECT vector FROM embeddings WHERE track_id = ?", (query_id,)
+        ).fetchone()
+        if not emb_row:
+            raise RuntimeError(
+                f"Track has no embedding. Run 'multidj analyze embed --apply' first."
+            )
+        query_vec = _blob_to_vec(emb_row["vector"])
+
+        track_ids, vectors = load_embeddings_from_db(conn)
+
+        query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-8)
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-8
+        distances = 1.0 - (vectors / norms) @ query_norm
+
+        idx_sorted = np.argsort(distances)
+        results: list[dict[str, Any]] = []
+        for idx in idx_sorted:
+            tid = track_ids[idx]
+            if tid == query_id:
+                continue
+            t = conn.execute(
+                "SELECT id, artist, title FROM tracks WHERE id = ?", (tid,)
+            ).fetchone()
+            if t:
+                results.append({
+                    "id": t["id"],
+                    "artist": t["artist"],
+                    "title": t["title"],
+                    "distance": round(float(distances[idx]), 4),
+                })
+            if len(results) >= top_n:
+                break
+
+    return {"query_track": query_info, "similar": results}
