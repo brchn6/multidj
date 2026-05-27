@@ -129,7 +129,42 @@ def run_pipeline(
         limit=limit,
     ))
 
-    # Step 8: Normalize genres
+    # Auto-skip embed/cluster if disabled in config
+    if not cfg.get("pipeline", {}).get("embed", True):
+        skip = skip | {"embed"}
+    if not cfg.get("pipeline", {}).get("cluster", True):
+        skip = skip | {"cluster"}
+
+    # Step 8: Embed tracks (requires [embeddings] extra)
+    def _run_embed(**kwargs):
+        try:
+            from .embed import analyze_embed as _ae
+            return _ae(**kwargs)
+        except ImportError:
+            raise RuntimeError("embeddings extra not installed; run: uv sync --extra embeddings")
+
+    steps.append(_run_step(
+        "embed", _run_embed,
+        db_path=db_path, apply=apply, backup_dir=False,
+        limit=limit,
+    ))
+
+    # Step 9: Cluster into Vibe/ crates
+    def _run_cluster(**kwargs):
+        try:
+            from .cluster import cluster_vibe as _cv
+            from .config import get_llm_config as _glc
+            return _cv(llm_config=_glc(cfg), **kwargs)
+        except ImportError:
+            raise RuntimeError("embeddings extra not installed; run: uv sync --extra embeddings")
+
+    steps.append(_run_step(
+        "cluster", _run_cluster,
+        db_path=db_path, apply=apply, backup_dir=False,
+        min_cluster_size=cfg.get("pipeline", {}).get("min_cluster_size", 5),
+    ))
+
+    # Step 10: Normalize genres
     steps.append(_run_step(
         "genres", clean_genres,
         db_path=db_path, apply=apply, backup=False,
