@@ -16,7 +16,12 @@ local function tag_and_next(rating, hard_delete)
     if hard_delete then
         table.insert(args, "--hard-delete")
     end
-    utils.subprocess({args = args, playback_only = false})
+
+    local result = utils.subprocess({args = args, playback_only = false})
+    if result.status ~= 0 then
+        mp.osd_message("ERROR: tag failed (check multidj is on PATH)", 3)
+        return
+    end
 
     if rating == 0 and hard_delete then
         mp.osd_message("DELETED from disk", 2)
@@ -44,6 +49,6 @@ mp.add_key_binding("n", "triage-skip", function()
     mp.commandv("playlist-next", "force")
 end)
 
--- Override default +-5s seek with +-30s
+-- Override default seek with +-30s jumps
 mp.add_key_binding("RIGHT", "seek-fwd-30", function() mp.commandv("seek", "30") end)
 mp.add_key_binding("LEFT",  "seek-bck-30", function() mp.commandv("seek", "-30") end)
