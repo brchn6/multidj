@@ -135,3 +135,134 @@ def detect_cues(filepath: str, bpm: float) -> list[dict[str, Any]]:
         cues.append(drop_candidate)
 
     return cues
+
+
+def analyze_cues(
+    db_path: str | None = None,
+    apply: bool = False,
+    force: bool = False,
+    limit: int | None = None,
+    backup_dir: Any = False,
+) -> dict[str, Any]:
+    """Detect and store structural cues for tracks missing them.
+
+    With force=True, re-analyzes tracks that already have cues.
+    """
+    from .db import connect, resolve_db_path, ensure_not_empty
+
+    db_path = str(resolve_db_path(db_path))
+
+    with connect(db_path, readonly=True) as conn:
+        ensure_not_empty(conn)
+
+        if force:
+            where = "1=1"
+        else:
+            where = """
+                NOT EXISTS (
+                    SELECT 1 FROM cue_points cp
+                    WHERE cp.track_id = t.id AND cp.source = 'auto'
+                )
+            """
+
+        rows = conn.execute(
+            f"SELECT id, path, bpm FROM tracks t WHERE deleted=0 AND {where} ORDER BY id"
+        ).fetchall()
+
+    candidates = [dict(r) for r in rows]
+    total_candidates = len(candidates)
+    if limit is not None:
+        candidates = candidates[:limit]
+
+    if not apply:
+        _progress(
+            f"Dry-run: {total_candidates:,} tracks would be analyzed "
+            "(run with --apply to process)"
+        )
+        return {"mode": "dry_run", "total_candidates": total_candidates, "processed": 0}
+
+    _progress(f"Analyzing {len(candidates):,} tracks for structural cues...")
+
+    succeeded = 0
+    failed = 0
+    errors: list[dict[str, str]] = []
+
+    with connect(db_path, readonly=False) as conn:
+        for row in candidates:
+            track_id = row["id"]
+            filepath = row["path"]
+            bpm = float(row["bpm"] or 120.0)
+            _progress(f"  {filepath.split('/')[-1][:60]}", end=" ")
+            try:
+                cues = detect_cues(filepath, bpm)
+
+                conn.execute(
+                    "DELETE FROM cue_points WHERE track_id=? AND source='auto'",
+                    (track_id,),
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO cue_points (track_id, type, position, label, confidence, source)
+                    VALUES (?, ?, ?, ?, ?, 'auto')
+                    """,
+                    [(track_id, c["type"], c["position"], c["label"], c["confidence"])
+                     for c in cues],
+                )
+
+                non_intro = [c for c in cues if c["type"] not in ("intro", "hot_cue")]
+                intro_end = non_intro[0]["position"] if non_intro else None
+                outro_cue = next((c for c in cues if c["type"] == "outro"), None)
+                outro_start = outro_cue["position"] if outro_cue else None
+
+                conn.execute(
+                    "UPDATE tracks SET intro_end=?, outro_start=? WHERE id=?",
+                    (intro_end, outro_start, track_id),
+                )
+
+                types = [c["type"] for c in cues if c["type"] not in ("hot_cue",)]
+                marks = {c["type"]: "✓" if c["confidence"] == "high" else "" for c in cues}
+                summary = " ".join(f"{t}{marks.get(t,'')}" for t in types[:6])
+                _progress(f"→ {summary}")
+                succeeded += 1
+            except Exception as exc:
+                failed += 1
+                errors.append({"path": filepath, "reason": str(exc)})
+                _progress(f"ERROR: {exc}")
+
+        conn.commit()
+
+    return {
+        "mode": "apply",
+        "total_candidates": total_candidates,
+        "processed": len(candidates),
+        "succeeded": succeeded,
+        "failed": failed,
+        "errors": errors,
+    }
+
+
+def clear_cues(
+    db_path: str | None = None,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Remove all source='auto' cue points and reset tracks.intro_end / outro_start."""
+    from .db import connect, resolve_db_path
+
+    db_path = str(resolve_db_path(db_path))
+
+    with connect(db_path, readonly=True) as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM cue_points WHERE source='auto'"
+        ).fetchone()[0]
+
+    if not apply:
+        _progress(f"Dry-run: {count:,} auto-detected cues would be removed")
+        return {"mode": "dry_run", "would_remove": count}
+
+    with connect(db_path, readonly=False) as conn:
+        conn.execute("DELETE FROM cue_points WHERE source='auto'")
+        conn.execute("UPDATE tracks SET intro_end=NULL, outro_start=NULL WHERE deleted=0")
+        conn.commit()
+
+    _progress(f"Removed {count:,} auto-detected cues")
+    return {"mode": "apply", "removed": count}
