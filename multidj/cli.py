@@ -23,6 +23,7 @@ from .report import write_dashboard_report
 from .triage import launch_session, tag_track
 from .scan import format_scan, scan_library
 from .utils import emit
+from .cues import analyze_cues as _analyze_cues, clear_cues as _clear_cues
 
 
 def _hoist_global_flags(argv: list[str]) -> list[str]:
@@ -185,6 +186,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force",       action="store_true", help="Overwrite existing key values")
     p.add_argument("--verbose", "-v", action="store_true", help="Show detected key for each track")
 
+    p_cues = analyze_sub.add_parser("cues", help="Detect structural cues (intro/verse/chorus/drop/outro)")
+    p_cues.add_argument("--apply", action="store_true", help="Write cues to DB (default: dry-run)")
+    p_cues.add_argument("--force", action="store_true", help="Re-analyze tracks that already have cues")
+    p_cues.add_argument("--limit", type=int, default=None, help="Cap number of tracks to process")
+
     # ── crates ───────────────────────────────────────────────────────────────
     crates_p = sub.add_parser("crates", help="Crate management")
     crates_sub = crates_p.add_subparsers(dest="crates_target", required=True)
@@ -214,6 +220,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-tracks", type=int, default=5)
     p.add_argument("--apply",      action="store_true")
     p.add_argument("--no-backup",  action="store_true")
+
+    # ── cues ─────────────────────────────────────────────────────────────────
+    cues_p = sub.add_parser("cues", help="Cue point management")
+    cues_sub = cues_p.add_subparsers(dest="cues_target", required=True)
+
+    p = cues_sub.add_parser("clear", help="Remove all auto-detected cues from DB")
+    p.add_argument("--apply", action="store_true", help="Write removal (default: dry-run)")
 
     # ── dedupe ───────────────────────────────────────────────────────────────
     p = sub.add_parser("dedupe", help="Find and remove duplicate tracks")
@@ -379,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
                 backup_dir=False if args.no_backup else None,
             )
-        else:
+        elif args.analyze_target == "key":
             result = analyze_key(
                 args.db,
                 apply=args.apply,
@@ -388,6 +401,13 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
                 force=args.force,
                 verbose=args.verbose,
+            )
+        elif args.analyze_target == "cues":
+            result = _analyze_cues(
+                db_path=args.db,
+                apply=args.apply,
+                force=args.force,
+                limit=args.limit,
             )
 
     elif args.command == "crates":
@@ -517,6 +537,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             launch_session(args.db, crate=args.crate, limit=args.limit)
             return 0
+
+    elif args.command == "cues":
+        if args.cues_target == "clear":
+            result = _clear_cues(db_path=args.db, apply=args.apply)
 
     else:
         parser.error("Unknown command.")
