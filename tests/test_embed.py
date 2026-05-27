@@ -133,3 +133,18 @@ def test_limit_restricts_processed(db, tmp_path):
          patch("multidj.embed._encode_audio_file", _stub_encode):
         result = analyze_embed(db_path=str(db), apply=True, limit=1, backup_dir=str(tmp_path))
     assert result["processed"] == 1
+
+
+from multidj.cli import main as cli_main
+
+
+def test_cli_analyze_embed_dry_run(db):
+    ret = cli_main(["--db", str(db), "analyze", "embed"])
+    assert ret == 0
+
+
+def test_cli_analyze_embed_apply(db, tmp_path):
+    with patch("multidj.embed.load_clap_model", _stub_load_clap), \
+         patch("multidj.embed._encode_audio_file", _stub_encode):
+        ret = cli_main(["--db", str(db), "analyze", "embed", "--apply"])
+    assert ret == 0

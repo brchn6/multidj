@@ -184,6 +184,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force",       action="store_true", help="Overwrite existing key values")
     p.add_argument("--verbose", "-v", action="store_true", help="Show detected key for each track")
 
+    p_embed = analyze_sub.add_parser("embed", help="Encode tracks as CLAP audio embeddings")
+    p_embed.add_argument("--apply",     action="store_true", help="Write embeddings (default: dry-run)")
+    p_embed.add_argument("--force",     action="store_true", help="Re-encode already-embedded tracks")
+    p_embed.add_argument("--limit",     type=int, default=None, help="Cap number of tracks to process")
+    p_embed.add_argument("--no-backup", action="store_true", dest="no_backup")
+
     # ── crates ───────────────────────────────────────────────────────────────
     crates_p = sub.add_parser("crates", help="Crate management")
     crates_sub = crates_p.add_subparsers(dest="crates_target", required=True)
@@ -357,6 +363,15 @@ def main(argv: list[str] | None = None) -> int:
         elif args.analyze_target == "energy":
             from .analyze import analyze_energy
             result = analyze_energy(
+                db_path=args.db,
+                apply=args.apply,
+                force=args.force,
+                limit=args.limit,
+                backup_dir=False if args.no_backup else None,
+            )
+        elif args.analyze_target == "embed":
+            from .embed import analyze_embed
+            result = analyze_embed(
                 db_path=args.db,
                 apply=args.apply,
                 force=args.force,
