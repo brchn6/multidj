@@ -7,6 +7,7 @@ Agent operating guide for this repository.
 - Read [README.md](README.md) for command behavior and CLI surface.
 - Read [CLAUDE.md](CLAUDE.md) for architecture, safety model, and module map.
 - For pipeline details, read [docs/superpowers/specs/2026-04-22-pipeline-design.md](docs/superpowers/specs/2026-04-22-pipeline-design.md).
+- For embeddings/clustering/similarity design, read [docs/superpowers/specs/2026-05-27-embeddings-clustering-design.md](docs/superpowers/specs/2026-05-27-embeddings-clustering-design.md).
 - Read [.agent-handoff/README.md](.agent-handoff/README.md) before coding in areas touched by prior sub-agents.
 
 ## Handoff Protocol
@@ -27,12 +28,12 @@ Agent operating guide for this repository.
 
 - Python: 3.9+
 - Install:
-  - `python3 -m venv .venv`
-  - `.venv/bin/pip install -e .`
-  - `.venv/bin/pip install -r requirements-dev.txt`
+  - `uv sync` — core deps
+  - `uv sync --extra analysis` — adds librosa (BPM, key, energy analysis)
+  - `uv sync --extra embeddings` — adds torch, transformers, librosa, umap-learn, hdbscan, openai (CLAP embeddings + clustering)
 - Main CLI entrypoint: `multidj` (legacy alias: `mixxx-tool`)
 - Run tests:
-  - `.venv/bin/pytest tests/ -v`
+  - `.venv/bin/pytest tests/ -v` — 232 passing (7 pre-existing failures in test_analyze_cues.py, Phase 9 not yet built)
   - `.venv/bin/pytest tests/test_pipeline.py -v`
 
 ## Critical Invariants
@@ -53,6 +54,8 @@ Agent operating guide for this repository.
 - Mixxx sync adapter: [multidj/adapters/mixxx.py](multidj/adapters/mixxx.py)
 - Directory import adapter: [multidj/adapters/directory.py](multidj/adapters/directory.py)
 - Crate logic and protection model: [multidj/crates.py](multidj/crates.py)
+- CLAP audio embeddings + KNN similarity: [multidj/embed.py](multidj/embed.py)
+- UMAP/HDBSCAN clustering + Vibe/ crate writing: [multidj/cluster.py](multidj/cluster.py)
 - Canonical fixture data for tests: [tests/fixtures/data.py](tests/fixtures/data.py)
 
 ## Change Guidance
@@ -67,6 +70,10 @@ Agent operating guide for this repository.
 - This repo may be run against the wrong DB path; commands often guard against Mixxx DB usage.
 - `pipeline --apply` should take one backup at start, not one per step.
 - Crate sync to Mixxx reconciles stale auto crates and membership; avoid partial sync logic changes unless fully tested.
+- `connect(readonly=True)` skips migrations. Any command that reads a recently added table (e.g., `embeddings`) must open a write connection first even if it writes nothing, to ensure the migration is applied.
+- `embed.py` uses `feat.pooler_output[0]` from `model.get_audio_features()` — the method returns `BaseModelOutputWithPooling` in current transformers versions, not a bare tensor. `feat[0]` would return `last_hidden_state` (wrong shape).
+- `Vibe/` crates are auto-generated and follow clear-and-rebuild lifecycle. Do not treat them as hand-curated — they will be deleted on next `cluster vibe --apply`.
+- CLAP model weights (1.5 GB) live at `~/.cache/huggingface/hub/models--laion--larger_clap_music/` — not in the repo or the MultiDJ DB dir.
 
 ## Repository Sync Note (2026-04-30)
 
@@ -80,3 +87,13 @@ Agent operating guide for this repository.
 - Added `multidj report dashboard` for standalone interactive HTML dashboard output with optional `--output` path.
 - Pipeline report step now generates the interactive dashboard by default while remaining read-only and non-fatal.
 - Added experimental Camelot harmonic transition analysis/visualization in crate views (UI-only interactions, no DB persistence).
+
+## Repository Sync Note (2026-05-27)
+
+- Phase 12 (semantic embeddings): `multidj/embed.py` added. `multidj analyze embed --apply [--force] [--limit N]`. CLAP model `laion/larger_clap_music`, 512-dim BLOB storage in new `embeddings` table (migration 004). Requires `uv sync --extra embeddings`.
+- Phase 12b (similarity search): `multidj similar <track> [--top N]` — KNN cosine-distance via numpy; read-only.
+- Phase 12 clustering: `multidj/cluster.py` added. `multidj cluster vibe --apply [--min-cluster-size N]`. UMAP+HDBSCAN → `Vibe/` auto-crates. LLM naming via `[llm]` config section (optional).
+- Pipeline now has 14 steps (embed at position 8, cluster at position 9). Both skip gracefully if extra not installed.
+- `Vibe/` prefix added to `AUTO_CRATE_PREFIXES` and `REBUILD_CRATE_RE` in `constants.py`.
+- `get_llm_config()` added to `config.py` — reads `[llm].base_url`, `[llm].api_key`, `[llm].model`.
+- PoC verified: 35 tracks encoded, 3 clusters found, 4 Vibe/ crates written, similarity search working on CPU.

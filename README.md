@@ -16,7 +16,12 @@ Optional audio analysis (BPM, key, energy detection):
 uv sync --extra analysis
 ```
 
-The `analysis` extra enables BPM, key, and energy detection in analyze commands.
+Optional semantic embeddings, clustering, and similarity search:
+```bash
+uv sync --extra embeddings
+```
+
+The `embeddings` extra adds CLAP audio encoding, UMAP+HDBSCAN clustering, and the `multidj similar` command. It includes `librosa`, `torch`, `transformers`, `umap-learn`, `hdbscan`, and `openai`. The CLAP model weights (~1.5 GB) are downloaded on first use to `~/.cache/huggingface/hub/`.
 
 ## How MultiDJ uses two databases
 
@@ -69,7 +74,7 @@ multidj pipeline \
 
 ```
 import directory → fix mismatches → parse → dedupe
-→ analyze bpm → analyze key → analyze energy
+→ analyze bpm → analyze key → analyze energy → analyze embed → cluster vibe
 → clean genres → clean text → crates rebuild → sync mixxx → report
 ```
 
@@ -241,6 +246,43 @@ multidj analyze energy --apply   # detect energy (0.0–1.0) and write to DB
 multidj analyze energy --force   # reprocess all tracks
 ```
 
+### Semantic embeddings (requires `uv sync --extra embeddings`)
+
+```bash
+multidj analyze embed            # dry-run: show how many tracks need embedding
+multidj analyze embed --apply    # encode all un-embedded tracks with CLAP (laion/larger_clap_music)
+multidj analyze embed --force    # re-encode all tracks (overwrite existing embeddings)
+multidj analyze embed --limit 50 # encode at most 50 tracks this run
+```
+
+### Clustering (requires `uv sync --extra embeddings`)
+
+```bash
+multidj cluster vibe             # dry-run: show cluster count that would be found
+multidj cluster vibe --apply     # UMAP+HDBSCAN → write Vibe/ auto-crates to DB
+multidj cluster vibe --apply --min-cluster-size 10
+```
+
+Produces crates named `Vibe/Dark-Techno` (if LLM naming configured) or `Vibe/Cluster-01` (fallback). Noise tracks go to `Vibe/Unclassified`. LLM naming is configured via `~/.multidj/config.toml`:
+
+```toml
+[llm]
+base_url = "https://opencode.ai/api/v1"
+api_key  = "your-api-key"
+model    = "deepseek/deepseek-chat"
+```
+
+### Similarity search (requires `uv sync --extra embeddings`)
+
+```bash
+multidj similar "AT NIGHT DUB"     # find the 10 most similar tracks by cosine distance
+multidj similar "Artist - Title"   # partial match on artist+title
+multidj similar /path/to/file.mp3  # exact path match
+multidj similar "AT NIGHT DUB" --top 20
+```
+
+Returns tracks ranked by cosine distance in CLAP embedding space (0 = identical, 1 = maximally different). Track must have been embedded first with `analyze embed --apply`.
+
 ### Parse filenames
 
 ```bash
@@ -306,7 +348,7 @@ multidj crates rebuild --apply   # delete old auto-crates, recreate from current
 multidj crates rebuild --min-tracks 10
 ```
 
-`crates rebuild` generates crates for all enabled dimensions in config: Genre:, BPM:, Key: (Camelot wheel), Energy: (Low/Mid/High), Lang:.
+`crates rebuild` generates crates for all enabled dimensions in config: Genre:, BPM:, Key: (Camelot wheel), Energy: (Low/Mid/High), Lang:. `Vibe/` crates are managed separately by `cluster vibe`.
 
 ### Deduplicate
 
@@ -369,13 +411,17 @@ multidj/
 ├── enrich.py           — is_hebrew(), enrich_language()
 ├── crates.py           — audit/hide/show/delete/rebuild_crates() with config-driven dimensions
 ├── dedupe.py           — dedupe()
+├── embed.py            — CLAP audio encoding: analyze_embed(), find_similar(), store_embedding(), load_embeddings_from_db()
+├── cluster.py          — UMAP+HDBSCAN clustering: cluster_vibe(), cluster_embeddings(), name_cluster()
 ├── adapters/
 │   ├── base.py         — SyncAdapter ABC
 │   ├── mixxx.py        — MixxxAdapter: import_all(), push_track(), full_sync() + crate sync
 │   └── directory.py    — DirectoryAdapter: import tracks from filesystem paths
 └── migrations/
     ├── 001_initial.sql — MultiDJ schema v1
-    └── 002_cue_points.sql — cue_points table
+    ├── 002_cue_points.sql — cue_points table
+    ├── 003_*.sql       — additional schema updates
+    └── 004_embeddings.sql — embeddings table (track_id PK, model_name, vector BLOB, created_at)
 
 tests/
 ├── conftest.py
@@ -412,10 +458,18 @@ pytest tests/test_pipeline.py -v   # single module
 
 | Path | Purpose |
 |------|---------|
-| `~/.multidj/library.sqlite` | MultiDJ DB (source of truth) |
-| `~/.multidj/config.toml` | User configuration (crate dimensions, music dir) |
+| `~/.multidj/library.sqlite` | MultiDJ DB (source of truth); configurable via `multidj config set-db` |
+| `~/.multidj/config.toml` | User configuration (crate dimensions, music dir, LLM API) |
 | `~/.multidj/backups/` | Timestamped backups |
 | `~/.mixxx/mixxxdb.sqlite` | Mixxx DB (read on import, written on sync) |
+| `~/.cache/huggingface/hub/models--laion--larger_clap_music/` | CLAP model weights (~1.5 GB, downloaded once on first `analyze embed --apply`) |
+
+## Repository Sync Note (2026-05-27)
+
+- **Semantic embeddings:** `multidj analyze embed --apply` encodes tracks with CLAP (`laion/larger_clap_music`, 512-dim). Requires `uv sync --extra embeddings`. Embeddings stored as BLOBs in the `embeddings` table (migration 004).
+- **Auto-clustering:** `multidj cluster vibe --apply` runs UMAP+HDBSCAN on the embedding matrix and writes `Vibe/` auto-crates. LLM naming via `[llm]` config; falls back to `Vibe/Cluster-NN`.
+- **Similarity search:** `multidj similar <track> [--top N]` — KNN cosine-distance search in embedding space, read-only.
+- **Pipeline now 14 steps:** `analyze embed` (step 8) and `cluster vibe` (step 9) added. Both skip gracefully if `[embeddings]` extra not installed. `--skip-embed` and `--skip-cluster` flags available.
 
 ## Repository Sync Note (2026-04-30)
 

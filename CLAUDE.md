@@ -6,19 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `MultiDJ` (package: `multidj`) is a Python 3.9+ CLI for DJ music library management. It maintains its own SQLite DB (`~/.multidj/library.sqlite`) as the source of truth and syncs to DJ software (Mixxx first; Rekordbox/Serato as future adapters). All write commands are **dry-run by default**, automatic backups are created before any writes, and JSON output is available for machine consumption. Eventually exposed as an MCP server for agent-native access.
 
-Migration from Mixxx-only tool is **complete** (Phases 0–4). All commands now operate on the MultiDJ DB. Phases 6–7 (standalone ingestion, Mixxx crate sync, pipeline command) are also complete.
+Migration from Mixxx-only tool is **complete** (Phases 0–4). All commands now operate on the MultiDJ DB. Phases 6–7 (standalone ingestion, Mixxx crate sync, pipeline command) are also complete. Phase 12 (semantic embeddings + UMAP/HDBSCAN clustering → `Vibe/` crates) and Phase 12b (`multidj similar` KNN search) are implemented and PoC-verified.
 
 ## Installation and Running
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e .
-.venv/bin/pip install -r requirements-dev.txt
-source .venv/bin/activate      # then use `multidj` directly
-multidj import mixxx --apply   # one-time: populate MultiDJ DB from Mixxx
-multidj pipeline --apply       # daily workflow: import→parse→analyze→crates→sync
-multidj <command>              # primary entry point
-mixxx-tool <command>           # legacy alias (same binary)
+uv sync                           # core deps
+uv sync --extra analysis          # + librosa (BPM, key, energy)
+uv sync --extra embeddings        # + torch, transformers, librosa, umap, hdbscan, openai
+source .venv/bin/activate
+multidj import mixxx --apply      # one-time: populate MultiDJ DB from Mixxx
+multidj pipeline --apply          # daily workflow: import→parse→analyze→crates→sync
+multidj <command>                 # primary entry point
+mixxx-tool <command>              # legacy alias (same binary)
 ```
 
 Override the DB path: `--db <path>` flag or `MULTIDJ_DB_PATH` environment variable.
@@ -29,7 +29,7 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 
 | Command | Description |
 |---|---|
-| `pipeline` | Primary daily workflow: chains all 8 steps; `--apply`, `--skip-<step>`, `--music-dir` |
+| `pipeline` | Primary daily workflow: chains all 14 steps; `--apply`, `--skip-<step>`, `--music-dir` |
 | `import mixxx` | One-time pull from `~/.mixxx/mixxxdb.sqlite` into MultiDJ DB |
 | `import directory PATH` | Import audio files from a directory; `--apply`, `--no-backup` |
 | `sync mixxx` | Push dirty tracks + crates back to Mixxx; `--apply`, `--no-backup` |
@@ -44,9 +44,12 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 | `analyze bpm` | BPM detection via librosa across start/middle/end windows; reports variable-BPM tracks; `--apply`, `--force`, `--limit` (requires librosa) |
 | `analyze key` | Key detection via librosa; `--apply`, `--write-tags`, `--force`, `--limit` (requires librosa) |
 | `analyze energy` | Energy score (RMS × centroid, normalized 0–1); `--apply`, `--force`, `--limit` (requires librosa) |
+| `analyze embed` | CLAP audio embeddings (512-dim) stored in `embeddings` table; `--apply`, `--force`, `--limit` (requires embeddings extra) |
+| `cluster vibe` | UMAP+HDBSCAN clustering of embeddings → `Vibe/` auto-crates; `--apply`, `--min-cluster-size` (requires embeddings extra) |
+| `similar TRACK` | KNN cosine-distance search in embedding space; `--top N`; read-only (requires embeddings extra) |
 | `crates audit` | Crate inventory and classification |
 | `crates hide/show/delete` | Bulk crate management |
-| `crates rebuild` | Rebuild all auto-crates (Genre:/BPM:/Key:/Energy:/Lang:) from config; `--apply`, `--min-tracks` |
+| `crates rebuild` | Rebuild all auto-crates (Genre:/BPM:/Key:/Energy:/Lang:/Vibe/) from config; `--apply`, `--min-tracks` |
 | `dedupe` | Duplicate detection (artist+title or filesize+duration) |
 
 **Global flags** (accepted anywhere in the command line): `--json`, `--db <path>`, `--version`
@@ -61,16 +64,18 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 2. **`db.py`** — `connect(db_path, readonly=True)` context manager; auto-applies SQL migrations on write connections; `resolve_db_path()`, `ensure_db_exists()`, `ensure_not_empty()`, `table_exists()`
 3. **`backup.py`** — creates timestamped DB copies before every write; returns `BackupResult`
 4. **`utils.py`** — `emit(data, json_mode)` for unified JSON/human output
-5. **`constants.py`** — uninformative genre list, crate classifier prefixes, shared regex patterns, `CAMELOT_KEY_MAP`, `KNOWN_ADAPTERS`
-6. **`config.py`** — `load_config()`, `save_config()`, `get_music_dir()`; reads/writes `~/.multidj/config.toml`; defaults on first run; preserves unknown sections
-7. **`pipeline.py`** — `run_pipeline()`: chains 8 steps, one backup at start, per-step error isolation, respects `skip` set
+5. **`constants.py`** — uninformative genre list, crate classifier prefixes (includes `Vibe/`), shared regex patterns, `CAMELOT_KEY_MAP`, `KNOWN_ADAPTERS`
+6. **`config.py`** — `load_config()`, `save_config()`, `get_music_dir()`, `get_llm_config()`; reads/writes `~/.multidj/config.toml`; defaults on first run; preserves unknown sections
+7. **`pipeline.py`** — `run_pipeline()`: chains 14 steps, one backup at start, per-step error isolation, respects `skip` set; lazy-imports embed/cluster to handle missing `[embeddings]` extra gracefully
 8. **`models.py`** — `LibrarySummary` dataclass
-9. **`adapters/base.py`** — `SyncAdapter` ABC (`import_all`, `push_track`, `full_sync`)
-10. **`adapters/mixxx.py`** — `MixxxAdapter`: reads Mixxx DB on import, writes back on sync + crate sync; `_push_crates_to_mixxx()` reconciles stale crates and membership
-11. **`adapters/directory.py`** — `DirectoryAdapter`: imports audio files from filesystem paths
-12. **Command modules** (`scan`, `audit`, `clean`, `analyze`, `parse`, `enrich`, `crates`, `dedupe`) — pure business logic, read-only unless `--apply` is passed
+9. **`embed.py`** — CLAP audio embedding: `analyze_embed()`, `find_similar()`, `load_clap_model()`, `store_embedding()`, `load_embeddings_from_db()`; uses `laion/larger_clap_music` (512-dim); 3-window sampling (start/mid/end × 30s); requires `[embeddings]` extra
+10. **`cluster.py`** — UMAP+HDBSCAN clustering: `cluster_embeddings()`, `cluster_vibe()`, `name_cluster()`; writes `Vibe/` auto-crates; LLM naming via OpenAI-compatible API (falls back to `Vibe/Cluster-NN` if no LLM config); requires `[embeddings]` extra
+11. **`adapters/base.py`** — `SyncAdapter` ABC (`import_all`, `push_track`, `full_sync`)
+12. **`adapters/mixxx.py`** — `MixxxAdapter`: reads Mixxx DB on import, writes back on sync + crate sync; `_push_crates_to_mixxx()` reconciles stale crates and membership
+13. **`adapters/directory.py`** — `DirectoryAdapter`: imports audio files from filesystem paths
+14. **Command modules** (`scan`, `audit`, `clean`, `analyze`, `parse`, `enrich`, `crates`, `dedupe`) — pure business logic, read-only unless `--apply` is passed
 
-**Migration system:** SQL files in `multidj/migrations/NNN_name.sql` are auto-applied in numeric order when `connect(readonly=False)` is called. Schema version tracked in `schema_version` table.
+**Migration system:** SQL files in `multidj/migrations/NNN_name.sql` are auto-applied in numeric order when `connect(readonly=False)` is called. Schema version tracked in `schema_version` table. **Critical:** `connect(readonly=True)` skips the migration runner — any command that reads a table added by a recent migration must open a write connection first (even if it writes nothing) to ensure the table exists.
 
 **MultiDJ DB schema** (`~/.multidj/library.sqlite`):
 - `tracks` — canonical track records (`id`, `path`, `artist`, `title`, `album`, `genre`, `bpm`, `key`, `language`, `duration`, `filesize`, `rating`, `play_count`, `remixer`, `energy`, `intro_end`, `outro_start`, `deleted`, `created_at`, `updated_at`)
@@ -78,12 +83,14 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 - `crates` — named collections with `type` (`hand-curated` vs auto) and `show` flag
 - `crate_tracks` — many-to-many join
 - `sync_state` — per-track, per-adapter dirty flag; trigger sets `dirty=1` on any `tracks` update
+- `embeddings` — CLAP 512-dim vectors stored as BLOB (float32); `(track_id PK, model_name, vector, created_at)`; added by migration 004
 
 **Key design invariants:**
 - `deleted = 0` filter applied everywhere (soft-deleted tracks excluded from all stats and operations)
 - Write operations use `executemany()` for batched DB updates
 - All analyze commands isolate per-track errors so one bad audio file doesn't abort the batch
-- Crates use a three-tier protection model: catch-all ("New Crate") → auto-generated (`Genre:`/`BPM:`/`Key:`/`Energy:`/`Lang:` prefix) → hand-curated (everything else). Hand-curated crates are protected unless `--include-hand-curated` is passed.
+- Crates use a three-tier protection model: catch-all ("New Crate") → auto-generated (`Genre:`/`BPM:`/`Key:`/`Energy:`/`Lang:`/`Vibe/` prefix) → hand-curated (everything else). Hand-curated crates are protected unless `--include-hand-curated` is passed.
+- `Vibe/` crates are auto-generated by `cluster vibe`; they are cleared and rebuilt on each apply run (clear-and-rebuild lifecycle matches other auto-crate dimensions). Noise tracks (HDBSCAN label -1) go to `Vibe/Unclassified`.
 - Duplicates and deleted crate tracks use soft-delete (`deleted=1`), not hard delete
 - `pipeline` takes one backup at start; individual steps pass `backup_dir=False` sentinel to suppress per-step backups
 - `sync mixxx --apply` reconciles Mixxx crates: stale auto-crates deleted, membership clear-and-repopulated. MultiDJ is the source of truth.
@@ -92,7 +99,7 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 ## Tests and Linting
 
 ```bash
-.venv/bin/pytest tests/ -v           # full suite (132 tests)
+.venv/bin/pytest tests/ -v           # full suite (232 passing + 7 pre-existing failures in test_analyze_cues.py — Phase 9 not yet implemented)
 .venv/bin/pytest tests/test_scan.py  # single module
 ```
 
@@ -112,3 +119,16 @@ No linting config. PEP 8 conventions with type hints throughout.
 - Added `multidj report dashboard` for standalone interactive HTML dashboard output with optional `--output` path.
 - Pipeline report step now generates the interactive dashboard by default while remaining read-only and non-fatal.
 - Added experimental Camelot harmonic transition analysis/visualization in crate views (UI-only interactions, no DB persistence).
+
+## Repository Sync Note (2026-05-27)
+
+- **Phase 12 (semantic embeddings) implemented:** `multidj/embed.py` — CLAP audio encoding (`laion/larger_clap_music`, 512-dim); 3-window sampling (start/mid/end × 30s); incremental (skips already-embedded tracks); `analyze embed --apply [--force] [--limit N]`. Requires `uv sync --extra embeddings`.
+- **Phase 12b (similarity search) implemented:** `multidj similar <track> [--top N]` — KNN cosine-distance search in embedding space using pure numpy; no extension required.
+- **Phase 12 clustering implemented:** `multidj/cluster.py` — UMAP (512d→10d) + HDBSCAN → `Vibe/` auto-crates; LLM naming via OpenAI-compatible API (configurable in `~/.multidj/config.toml` under `[llm]`); falls back to `Vibe/Cluster-NN` if no LLM config. `cluster vibe --apply [--min-cluster-size N]`. Requires `[embeddings]` extra.
+- **Migration 004** adds `embeddings` table (BLOB storage for float32 vectors). `analyze_embed()` opens a write connection before any reads to ensure the migration is applied.
+- **Pipeline expanded to 14 steps:** steps 8 (embed) and 9 (cluster) added after energy. Both are skipped gracefully if `[embeddings]` extra is not installed or if `pipeline.embed`/`pipeline.cluster` is `false` in config. `--skip-embed` and `--skip-cluster` flags available.
+- **`Vibe/` added to `AUTO_CRATE_PREFIXES` and `REBUILD_CRATE_RE`** in `constants.py` — treated as auto-crates throughout the crate protection model.
+- **`get_llm_config()` added to `config.py`** — reads `[llm]` section (`base_url`, `api_key`, `model`) from config; returns `None` if not configured (cluster still works offline).
+- **PoC verified on real library:** 35 tracks encoded at 512-dim, 3 UMAP/HDBSCAN clusters found, 4 `Vibe/` crates written (including `Vibe/Unclassified` for noise). Similarity search returns ranked results. All on CPU only.
+- **Known issue:** CLAP `ClapProcessor` kwarg renamed from `audios=` to `audio=` in newer transformers versions. Current code uses `audio=`. If you downgrade transformers, revert this.
+- **Model weights:** `laion/larger_clap_music` (1.5 GB) cached at `~/.cache/huggingface/hub/` — downloaded once on first `analyze embed --apply`, reused thereafter.
