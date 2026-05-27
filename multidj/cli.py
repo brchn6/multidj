@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import __version__
 from .adapters.mixxx import MixxxAdapter
 from .analyze import analyze_key
-from .audit import audit_genres, audit_metadata
+from .audit import audit_genres, audit_metadata, audit_mismatches
 from .backup import create_backup
 from .clean import clean_genres, clean_text
 from .config import load_config, save_config, get_music_dir
@@ -18,12 +19,13 @@ from .dedupe import dedupe
 from .enrich import enrich_language
 from .parse import parse_library
 from .pipeline import run_pipeline
+from .report import write_dashboard_report
 from .scan import format_scan, scan_library
 from .utils import emit
 
 
 def _hoist_global_flags(argv: list[str]) -> list[str]:
-    """Move --json and --db <val> before the first positional (subcommand) token."""
+    """Move --json, --db <val>, and --dry-run before the first positional (subcommand) token."""
     global_flags: list[str] = []
     rest: list[str] = []
     i = 0
@@ -33,6 +35,8 @@ def _hoist_global_flags(argv: list[str]) -> list[str]:
         elif argv[i] == "--db" and i + 1 < len(argv):
             global_flags += [argv[i], argv[i + 1]]
             i += 1
+        elif argv[i] == "--dry-run":
+            global_flags.append(argv[i])
         else:
             rest.append(argv[i])
         i += 1
@@ -96,8 +100,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", help="Path to MultiDJ SQLite database (default: ~/.multidj/library.sqlite)")
     parser.add_argument("--json", action="store_true", help="Emit JSON output")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing (default behavior)")
 
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # ── config ────────────────────────────────────────────────────────────────
+    config_p = sub.add_parser("config", help="View or set persistent configuration")
+    config_sub = config_p.add_subparsers(dest="config_target", required=True)
+    p = config_sub.add_parser("set-db", help="Save default DB path to config (~/.multidj/config.toml)")
+    p.add_argument("db_path_value", metavar="PATH", help="Path to the MultiDJ SQLite database")
+    p = config_sub.add_parser("set-music-dir", help="Save default music directory to config")
+    p.add_argument("music_dir_value", metavar="PATH", help="Path to your main music folder")
+    config_sub.add_parser("show", help="Print current config")
 
     # ── scan ─────────────────────────────────────────────────────────────────
     p = sub.add_parser("scan", help="Library and schema summary")
@@ -125,6 +139,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit_sub.add_parser("metadata", help="Field coverage percentages")
 
+    p = audit_sub.add_parser("mismatches", help="Detect artist/title swap mismatches vs filenames")
+    p.add_argument("--limit", type=int, default=100, help="Max mismatches to report (default: 100)")
+
     # ── enrich ────────────────────────────────────────────────────────────────
     enrich_p = sub.add_parser("enrich", help="Enrich track metadata from external signals")
     enrich_sub = enrich_p.add_subparsers(dest="enrich_target", required=True)
@@ -136,7 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     for name, help_text in [
         ("genres", "Collapse case variants, null uninformative genres, fix whitespace"),
-        ("text",   "Strip and collapse whitespace in artist / title / album"),
+        ("text",   "Strip/collapse whitespace and remove known title video/download suffix noise"),
     ]:
         p = clean_sub.add_parser(name, help=help_text)
         p.add_argument("--apply",     action="store_true", help="Write changes (default: dry-run)")
@@ -232,14 +249,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipeline.add_argument("--apply",        action="store_true")
     p_pipeline.add_argument("--mixxx-db",     default=None, dest="mixxx_db")
     p_pipeline.add_argument("--music-dir",    default=None, dest="music_dir")
-    p_pipeline.add_argument("--skip-import",  action="store_true", dest="skip_import")
-    p_pipeline.add_argument("--skip-parse",   action="store_true", dest="skip_parse")
-    p_pipeline.add_argument("--skip-bpm",     action="store_true", dest="skip_bpm")
-    p_pipeline.add_argument("--skip-key",     action="store_true", dest="skip_key")
-    p_pipeline.add_argument("--skip-energy",  action="store_true", dest="skip_energy")
-    p_pipeline.add_argument("--skip-genres",  action="store_true", dest="skip_genres")
-    p_pipeline.add_argument("--skip-crates",  action="store_true", dest="skip_crates")
-    p_pipeline.add_argument("--skip-sync",    action="store_true", dest="skip_sync")
+    p_pipeline.add_argument("--skip-import",          action="store_true", dest="skip_import")
+    p_pipeline.add_argument("--skip-fix-mismatches",  action="store_true", dest="skip_fix_mismatches")
+    p_pipeline.add_argument("--skip-parse",            action="store_true", dest="skip_parse")
+    p_pipeline.add_argument("--skip-bpm",              action="store_true", dest="skip_bpm")
+    p_pipeline.add_argument("--skip-key",              action="store_true", dest="skip_key")
+    p_pipeline.add_argument("--skip-energy",           action="store_true", dest="skip_energy")
+    p_pipeline.add_argument("--skip-genres",           action="store_true", dest="skip_genres")
+    p_pipeline.add_argument("--skip-clean-text",       action="store_true", dest="skip_clean_text")
+    p_pipeline.add_argument("--skip-crates",           action="store_true", dest="skip_crates")
+    p_pipeline.add_argument("--skip-sync",             action="store_true", dest="skip_sync")
+    p_pipeline.add_argument("--report-output",         default=None, dest="report_output",
+                            help="Output path for HTML report (default: ./multidj_report.html)")
+    p_pipeline.add_argument("--skip-report",           action="store_true", dest="skip_report",
+                            help="Disable HTML report generation")
+
+    # ── report ───────────────────────────────────────────────────────────────
+    report_p = sub.add_parser("report", help="Generate library reports")
+    report_sub = report_p.add_subparsers(dest="report_target", required=True)
+    p = report_sub.add_parser("dashboard", help="Generate standalone interactive HTML dashboard")
+    p.add_argument("--output", default="multidj_report.html",
+                   help="Output HTML path (default: ./multidj_report.html)")
 
     return parser
 
@@ -250,6 +280,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(raw)
 
     result: Any
+
+    if args.command == "config":
+        cfg_data = load_config()
+        if args.config_target == "set-db":
+            db_val = str(Path(args.db_path_value).expanduser())
+            cfg_data.setdefault("db", {})["path"] = db_val
+            save_config(cfg_data)
+            emit(f"Default DB path set to: {db_val}", as_json=args.json)
+        elif args.config_target == "set-music-dir":
+            music_val = str(Path(args.music_dir_value).expanduser())
+            cfg_data.setdefault("pipeline", {})["music_dir"] = music_val
+            save_config(cfg_data)
+            emit(f"Default music dir set to: {music_val}", as_json=args.json)
+        else:  # show
+            import json as _json
+            emit(_json.dumps(cfg_data, indent=2) if args.json else
+                 "\n".join(f"[{s}]\n" + "\n".join(f"  {k} = {v}" for k, v in vals.items())
+                           for s, vals in cfg_data.items()),
+                 as_json=False)
+        return 0
 
     if args.command == "scan":
         data = scan_library(args.db, verbose=args.verbose)
@@ -274,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "audit":
         if args.audit_target == "genres":
             result = audit_genres(args.db, top_n=args.top)
+        elif args.audit_target == "mismatches":
+            result = audit_mismatches(args.db, limit=args.limit)
         else:
             result = audit_metadata(args.db)
 
@@ -399,14 +451,17 @@ def main(argv: list[str] | None = None) -> int:
                 print("Saved to ~/.multidj/config.toml")
 
         skip: set[str] = set()
-        if args.skip_import:  skip.add("import")
-        if args.skip_parse:   skip.add("parse")
-        if args.skip_bpm:     skip.add("bpm")
-        if args.skip_key:     skip.add("key")
-        if args.skip_energy:  skip.add("energy")
-        if args.skip_genres:  skip.add("genres")
-        if args.skip_crates:  skip.add("crates")
-        if args.skip_sync:    skip.add("sync")
+        if args.skip_import:          skip.add("import")
+        if args.skip_fix_mismatches:  skip.add("fix_mismatches")
+        if args.skip_parse:           skip.add("parse")
+        if args.skip_bpm:             skip.add("bpm")
+        if args.skip_key:             skip.add("key")
+        if args.skip_energy:          skip.add("energy")
+        if args.skip_genres:          skip.add("genres")
+        if args.skip_clean_text:      skip.add("clean_text")
+        if args.skip_crates:          skip.add("crates")
+        if args.skip_sync:            skip.add("sync")
+        if args.skip_report:          skip.add("report")
 
         result = run_pipeline(
             db_path=args.db,
@@ -415,9 +470,26 @@ def main(argv: list[str] | None = None) -> int:
             apply=args.apply,
             music_dir=music_dir,
             skip=skip,
+            report_output=args.report_output,
+            skip_report=args.skip_report,
         )
         emit(result, as_json=args.json)
         return 0
+
+    elif args.command == "report":
+        if args.report_target == "dashboard":
+            write_dashboard_report(args.db, args.output)
+            result = {
+                "mode": "read_only",
+                "report": {
+                    "path": args.output,
+                    "generated": True,
+                    "type": "dashboard",
+                },
+            }
+        else:
+            parser.error("Unknown report command.")
+            return 2
 
     else:
         parser.error("Unknown command.")

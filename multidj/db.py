@@ -12,7 +12,17 @@ MIXXX_DB_PATH   = Path("~/.mixxx/mixxxdb.sqlite").expanduser()
 
 def resolve_db_path(db_path: str | None = None) -> Path:
     candidate = db_path or os.environ.get("MULTIDJ_DB_PATH")
-    return Path(candidate).expanduser() if candidate else DEFAULT_DB_PATH
+    if candidate:
+        return Path(candidate).expanduser()
+    # Fall back to db.path from config if set
+    try:
+        from .config import load_config
+        cfg_path = load_config().get("db", {}).get("path", "").strip()
+        if cfg_path:
+            return Path(cfg_path).expanduser()
+    except Exception:
+        pass
+    return DEFAULT_DB_PATH
 
 
 def ensure_db_exists(db_path: Path) -> None:
@@ -57,7 +67,14 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
             conn.execute("UPDATE schema_version SET version = ?", (n,))
             conn.commit()
         except Exception as exc:
-            raise RuntimeError(f"Migration {script.name} failed: {exc}") from exc
+            # "duplicate column name" means ALTER TABLE ADD COLUMN for a column
+            # that already exists — the desired end state is already present,
+            # so treat this as a successful no-op and advance the version.
+            if "duplicate column name" in str(exc).lower():
+                conn.execute("UPDATE schema_version SET version = ?", (n,))
+                conn.commit()
+            else:
+                raise RuntimeError(f"Migration {script.name} failed: {exc}") from exc
 
 
 @contextmanager
