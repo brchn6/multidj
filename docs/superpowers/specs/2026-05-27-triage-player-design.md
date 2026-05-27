@@ -65,10 +65,12 @@ multidj/
    - Calls `subprocess.run(["mpv", "--playlist=<m3u>", "--script=<lua>", "--no-video"])`
    - Cleans up temp M3U in `finally` block
 
-4. `tag_track(db_path, file_path, rating)` → entry point for `multidj triage tag`
-   - `rating=0`: `UPDATE tracks SET deleted=1 WHERE path=? AND deleted=0`
+4. `tag_track(db_path, file_path, rating, hard_delete=False)` → entry point for `multidj triage tag`
+   - `rating=0, hard_delete=False`: `UPDATE tracks SET deleted=1` (soft-delete; file stays on disk)
+   - `rating=0, hard_delete=True`: soft-delete in DB **and** `os.unlink(file_path)` — permanently removes the audio file
    - `rating=1–5`: `UPDATE tracks SET rating=? WHERE path=? AND deleted=0`
    - No `--apply` gate — keypress is the user's explicit action
+   - If `hard_delete=True` but file does not exist on disk: DB write still happens, unlink silently skipped
    - `sync_state` dirty trigger fires automatically on any `UPDATE tracks`
    - Prints nothing (called from Lua subprocess, output is discarded)
 
@@ -80,16 +82,19 @@ Does **not** live in `~/.config/mpv/scripts/` — it would hijack numpad keys in
 ```lua
 local utils = require("mp.utils")
 
-local function tag_and_next(rating)
+local function tag_and_next(rating, hard_delete)
     local path = mp.get_property("path")
     if not path then return end
 
-    utils.subprocess({
-        args = {"multidj", "triage", "tag", "--path", path, "--rating", tostring(rating)},
-        playback_only = false,
-    })
+    local args = {"multidj", "triage", "tag", "--path", path, "--rating", tostring(rating)}
+    if hard_delete then
+        table.insert(args, "--hard-delete")
+    end
+    utils.subprocess({args = args, playback_only = false})
 
-    if rating == 0 then
+    if rating == 0 and hard_delete then
+        mp.osd_message("DELETED from disk", 2)
+    elseif rating == 0 then
         mp.osd_message("Trashed", 1.5)
     else
         local stars = string.rep("*", rating) .. string.rep("-", 5 - rating)
@@ -99,12 +104,13 @@ local function tag_and_next(rating)
     mp.commandv("playlist-next", "force")
 end
 
-mp.add_key_binding("KP0", "triage-trash",  function() tag_and_next(0) end)
-mp.add_key_binding("KP1", "triage-rate-1", function() tag_and_next(1) end)
-mp.add_key_binding("KP2", "triage-rate-2", function() tag_and_next(2) end)
-mp.add_key_binding("KP3", "triage-rate-3", function() tag_and_next(3) end)
-mp.add_key_binding("KP4", "triage-rate-4", function() tag_and_next(4) end)
-mp.add_key_binding("KP5", "triage-rate-5", function() tag_and_next(5) end)
+mp.add_key_binding("KP0",       "triage-trash",       function() tag_and_next(0, false) end)
+mp.add_key_binding("Shift+KP0", "triage-hard-delete", function() tag_and_next(0, true)  end)
+mp.add_key_binding("KP1", "triage-rate-1", function() tag_and_next(1, false) end)
+mp.add_key_binding("KP2", "triage-rate-2", function() tag_and_next(2, false) end)
+mp.add_key_binding("KP3", "triage-rate-3", function() tag_and_next(3, false) end)
+mp.add_key_binding("KP4", "triage-rate-4", function() tag_and_next(4, false) end)
+mp.add_key_binding("KP5", "triage-rate-5", function() tag_and_next(5, false) end)
 
 mp.add_key_binding("n", "triage-skip", function()
     mp.osd_message("Skipped", 1)
@@ -124,7 +130,8 @@ multidj triage                         # all unrated tracks, library-wide
 multidj triage --crate "Genre:Techno"  # tracks in a named crate
 multidj triage --limit 50              # cap session at 50 tracks
 
-multidj triage tag --path FILE --rating N   # internal; called by Lua only
+multidj triage tag --path FILE --rating N              # internal; soft-delete or rate
+multidj triage tag --path FILE --rating 0 --hard-delete  # internal; rm file from disk
 ```
 
 `triage tag` is a write command (always applies, no dry-run). It is not intended for
@@ -134,14 +141,15 @@ direct user invocation but must be accessible as a CLI command for the Lua subpr
 
 ## Key Bindings Reference
 
-| Key | Action | DB write |
-|-----|--------|----------|
-| `KP0` | Trash | `deleted=1` |
-| `KP1`–`KP5` | Rate 1–5 | `rating=N` |
-| `n` | Skip (defer) | none |
-| `→` | Seek +30s | none |
-| `←` | Seek -30s | none |
-| `q` | Quit | none (mpv built-in) |
+| Key | Action | DB write | File |
+|-----|--------|----------|------|
+| `KP0` | Soft-delete | `deleted=1` | stays on disk |
+| `Shift+KP0` | Hard delete | `deleted=1` | **rm from disk** |
+| `KP1`–`KP5` | Rate 1–5 | `rating=N` | untouched |
+| `n` | Skip (defer) | none | untouched |
+| `→` | Seek +30s | none | untouched |
+| `←` | Seek -30s | none | untouched |
+| `q` | Quit | none | untouched |
 
 ---
 
@@ -163,7 +171,13 @@ multidj triage [--crate NAME] [--limit N]
   → Lua: playlist-next
 
 [user presses KP0]
-  → same flow but: UPDATE tracks SET deleted=1 WHERE path=?
+  → Lua: subprocess(["multidj", "triage", "tag", "--path", path, "--rating", "0"])
+  → Python: UPDATE tracks SET deleted=1 WHERE path=?   (file stays on disk)
+
+[user presses Shift+KP0]
+  → Lua: subprocess(["multidj", "triage", "tag", "--path", path, "--rating", "0", "--hard-delete"])
+  → Python: UPDATE tracks SET deleted=1 WHERE path=?
+  → Python: os.unlink(path)   (file removed from disk — irreversible)
 
 [mpv exits / playlist exhausted]
   → Python finally: os.unlink(m3u_path)
@@ -191,6 +205,7 @@ multidj = ["assets/*.lua"]
 | `mpv` not in PATH | Print `"mpv not found — install it with: dnf install mpv"` and exit 1 |
 | Empty triage queue | Print `"No tracks to triage"` and exit 0 |
 | `triage tag` path not in DB | Silent no-op (track may have been deleted between session build and keypress) |
+| `--hard-delete` but file missing on disk | DB soft-delete still written; `os.unlink` skipped silently |
 | mpv exits non-zero | Temp M3U still cleaned up; exit code propagated |
 
 ---

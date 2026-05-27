@@ -56,20 +56,23 @@ Write `multidj/assets/triage.lua`:
 
 local utils = require("mp.utils")
 
-local function tag_and_next(rating)
+local function tag_and_next(rating, hard_delete)
     local path = mp.get_property("path")
     if not path then return end
 
-    utils.subprocess({
-        args = {
-            "multidj", "triage", "tag",
-            "--path", path,
-            "--rating", tostring(rating),
-        },
-        playback_only = false,
-    })
+    local args = {
+        "multidj", "triage", "tag",
+        "--path", path,
+        "--rating", tostring(rating),
+    }
+    if hard_delete then
+        table.insert(args, "--hard-delete")
+    end
+    utils.subprocess({args = args, playback_only = false})
 
-    if rating == 0 then
+    if rating == 0 and hard_delete then
+        mp.osd_message("DELETED from disk", 2)
+    elseif rating == 0 then
         mp.osd_message("Trashed", 1.5)
     else
         local filled = string.rep("*", rating)
@@ -80,12 +83,13 @@ local function tag_and_next(rating)
     mp.commandv("playlist-next", "force")
 end
 
-mp.add_key_binding("KP0", "triage-trash",  function() tag_and_next(0) end)
-mp.add_key_binding("KP1", "triage-rate-1", function() tag_and_next(1) end)
-mp.add_key_binding("KP2", "triage-rate-2", function() tag_and_next(2) end)
-mp.add_key_binding("KP3", "triage-rate-3", function() tag_and_next(3) end)
-mp.add_key_binding("KP4", "triage-rate-4", function() tag_and_next(4) end)
-mp.add_key_binding("KP5", "triage-rate-5", function() tag_and_next(5) end)
+mp.add_key_binding("KP0",       "triage-trash",       function() tag_and_next(0, false) end)
+mp.add_key_binding("Shift+KP0", "triage-hard-delete", function() tag_and_next(0, true)  end)
+mp.add_key_binding("KP1", "triage-rate-1", function() tag_and_next(1, false) end)
+mp.add_key_binding("KP2", "triage-rate-2", function() tag_and_next(2, false) end)
+mp.add_key_binding("KP3", "triage-rate-3", function() tag_and_next(3, false) end)
+mp.add_key_binding("KP4", "triage-rate-4", function() tag_and_next(4, false) end)
+mp.add_key_binding("KP5", "triage-rate-5", function() tag_and_next(5, false) end)
 
 mp.add_key_binding("n", "triage-skip", function()
     mp.osd_message("Skipped", 1)
@@ -329,6 +333,7 @@ git commit -m "feat: implement build_triage_queue and write_m3u"
 
 ```python
 from multidj.triage import build_triage_queue, write_m3u, tag_track
+import os
 
 
 # ── tag_track ─────────────────────────────────────────────────────────────────
@@ -372,6 +377,38 @@ def test_tag_track_unknown_path_noop(multidj_db, multidj_db_conn):
         "SELECT COUNT(*) FROM tracks WHERE deleted=1"
     ).fetchone()[0]
     assert count_after == count_before
+
+
+def test_tag_track_hard_delete_removes_file(multidj_db, multidj_db_conn, tmp_path):
+    """--hard-delete removes the audio file from disk AND sets deleted=1 in DB."""
+    # Create a real temp file to represent the track
+    fake_file = tmp_path / "fake_track.mp3"
+    fake_file.write_bytes(b"fake audio")
+
+    # Insert a track row pointing at our temp file
+    multidj_db_conn.execute(
+        "INSERT INTO tracks (path, artist, title, deleted) VALUES (?, 'A', 'T', 0)",
+        (str(fake_file),),
+    )
+    multidj_db_conn.commit()
+
+    tag_track(str(multidj_db), str(fake_file), rating=0, hard_delete=True)
+
+    assert not fake_file.exists()  # file gone from disk
+    row = multidj_db_conn.execute(
+        "SELECT deleted FROM tracks WHERE path=?", (str(fake_file),)
+    ).fetchone()
+    assert row["deleted"] == 1
+
+
+def test_tag_track_hard_delete_missing_file_noop(multidj_db, multidj_db_conn):
+    """--hard-delete with a file already gone from disk: DB write succeeds, no exception."""
+    path = "/music/fixture/01_DJ_Tiesto_-_Red_Lights.mp3"  # in DB but not on disk in tests
+    tag_track(str(multidj_db), path, rating=0, hard_delete=True)  # must not raise
+    row = multidj_db_conn.execute(
+        "SELECT deleted FROM tracks WHERE path=?", (path,)
+    ).fetchone()
+    assert row["deleted"] == 1
 
 
 def test_tag_track_marks_dirty(multidj_db):
@@ -426,11 +463,17 @@ git commit -m "test: add failing tests for tag_track"
 Add after the `write_m3u` function:
 
 ```python
-def tag_track(db_path: str | None, file_path: str, rating: int) -> None:
+def tag_track(
+    db_path: str | None,
+    file_path: str,
+    rating: int,
+    hard_delete: bool = False,
+) -> None:
     """Write a triage decision to the DB. Called by the Lua script as a subprocess.
 
-    rating=0 → soft-delete (deleted=1). rating 1-5 → set rating field.
-    Unknown path is a silent no-op. No dry-run gate — keypress is the apply.
+    rating=0 → soft-delete (deleted=1). hard_delete=True also removes file from disk.
+    rating 1-5 → set rating field. Unknown path is a silent no-op.
+    No dry-run gate — keypress is the apply.
     """
     with connect(db_path, readonly=False) as conn:
         if rating == 0:
@@ -438,12 +481,18 @@ def tag_track(db_path: str | None, file_path: str, rating: int) -> None:
                 "UPDATE tracks SET deleted = 1 WHERE path = ? AND deleted = 0",
                 (file_path,),
             )
+            conn.commit()
+            if hard_delete:
+                try:
+                    os.unlink(file_path)
+                except OSError:
+                    pass  # file already gone — DB write still stands
         else:
             conn.execute(
                 "UPDATE tracks SET rating = ? WHERE path = ? AND deleted = 0",
                 (rating, file_path),
             )
-        conn.commit()
+            conn.commit()
 ```
 
 - [ ] **Step 2: Run the tag_track tests and confirm they PASS**
@@ -580,10 +629,12 @@ Add after the `# ── report ───` block (around line 295, before `return
                           help="Cap number of tracks in the session")
     triage_sub = triage_p.add_subparsers(dest="triage_target")
     p_tag = triage_sub.add_parser("tag", help="Internal: write a triage decision (called by Lua)")
-    p_tag.add_argument("--path",   required=True,
+    p_tag.add_argument("--path",        required=True,
                        help="Absolute path to the audio file")
-    p_tag.add_argument("--rating", type=int, required=True, choices=range(0, 6),
-                       help="0=trash (soft-delete), 1-5=quality rating")
+    p_tag.add_argument("--rating",      type=int, required=True, choices=range(0, 6),
+                       help="0=trash (soft-delete or hard-delete), 1-5=quality rating")
+    p_tag.add_argument("--hard-delete", action="store_true", dest="hard_delete",
+                       help="Also remove the file from disk (only valid with --rating 0)")
 ```
 
 - [ ] **Step 3: Add the triage routing to `main()` in `cli.py`**
@@ -593,7 +644,7 @@ Add after the `elif args.command == "report":` block (before the final `else:` c
 ```python
     elif args.command == "triage":
         if args.triage_target == "tag":
-            tag_track(args.db, args.path, args.rating)
+            tag_track(args.db, args.path, args.rating, hard_delete=args.hard_delete)
             return 0
         else:
             launch_session(args.db, crate=args.crate, limit=args.limit)
@@ -723,7 +774,7 @@ git commit -m "docs: document triage command in CLAUDE.md and MVP_PROGRESS.md"
 .venv/bin/pytest tests/ -v 2>&1 | tail -30
 ```
 
-Expected: all tests PASS. Count should be 132 (existing) + 14 (new triage tests) = 146 total.
+Expected: all tests PASS. Count should be 132 (existing) + 16 (new triage tests) = 148 total.
 
 - [ ] **Step 2: Verify the CLI end-to-end (no mpv needed)**
 
@@ -762,7 +813,7 @@ gh pr create \
 
 ## Test plan
 - [ ] \`pytest tests/test_triage.py -v\` — all 14 new tests pass
-- [ ] \`pytest tests/ -v\` — all 146 tests pass (no regressions)
+- [ ] \`pytest tests/ -v\` — all 148 tests pass (no regressions)
 - [ ] \`multidj triage --help\` and \`multidj triage tag --help\` render correctly
 - [ ] Manual: \`multidj triage --limit 5\` with mpv installed plays tracks and writes decisions
 EOF
