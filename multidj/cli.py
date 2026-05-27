@@ -228,6 +228,24 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Soft-delete duplicates (sets mixxx_deleted=1, reversible)")
     p.add_argument("--no-backup", action="store_true", help="Skip backup before apply")
 
+    # ── cluster ──────────────────────────────────────────────────────────────
+    cluster_p = sub.add_parser("cluster", help="Cluster tracks by embedding similarity")
+    cluster_sub = cluster_p.add_subparsers(dest="cluster_target", required=True)
+
+    p_vibe = cluster_sub.add_parser("vibe", help="Build Vibe/ crates from CLAP embedding clusters")
+    p_vibe.add_argument("--apply",            action="store_true", help="Write Vibe/ crates to DB")
+    p_vibe.add_argument("--min-cluster-size", type=int, default=5, dest="min_cluster_size",
+                        help="Minimum tracks per cluster (default: 5)")
+    p_vibe.add_argument("--prefix",           default="Vibe/", help="Crate name prefix (default: Vibe/)")
+    p_vibe.add_argument("--no-backup",        action="store_true", dest="no_backup")
+
+    # ── similar ───────────────────────────────────────────────────────────────
+    p_similar = sub.add_parser("similar", help="Find tracks similar to a given track by embedding distance")
+    p_similar.add_argument("track_ref", metavar="TRACK",
+                           help="File path or 'Artist - Title' search string")
+    p_similar.add_argument("--top", type=int, default=10, dest="top_n",
+                           help="Number of similar tracks to return (default: 10)")
+
     # ── import ────────────────────────────────────────────────────────────────
     import_p = sub.add_parser("import", help="Import tracks from external sources")
     import_sub = import_p.add_subparsers(dest="import_target", required=True)
@@ -425,6 +443,31 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "dedupe":
         result = dedupe(args.db, by=args.by, apply=args.apply, backup=not args.no_backup)
+
+    elif args.command == "cluster":
+        if args.cluster_target == "vibe":
+            from .cluster import cluster_vibe
+            from .config import get_llm_config
+            try:
+                result = cluster_vibe(
+                    db_path=args.db,
+                    apply=args.apply,
+                    min_cluster_size=args.min_cluster_size,
+                    prefix=args.prefix,
+                    llm_config=get_llm_config(),
+                    backup_dir=False if args.no_backup else None,
+                )
+            except RuntimeError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+
+    elif args.command == "similar":
+        from .embed import find_similar
+        try:
+            result = find_similar(db_path=args.db, track_ref=args.track_ref, top_n=args.top_n)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
 
     elif args.command == "import":
         if args.import_target == "mixxx":

@@ -131,3 +131,17 @@ def test_numbered_fallback_when_no_llm(db_with_embeddings, tmp_path):
     raw.close()
     for n in names:
         assert n.startswith("Vibe/")
+
+
+from multidj.cli import main as cli_main
+
+
+def test_cli_cluster_vibe_too_few_tracks(db):
+    ret = cli_main(["--db", str(db), "cluster", "vibe"])
+    assert ret == 1
+
+
+def test_cli_cluster_vibe_dry_run(db_with_embeddings):
+    db, _ = db_with_embeddings
+    ret = cli_main(["--db", str(db), "cluster", "vibe", "--min-cluster-size", "2"])
+    assert ret == 0
