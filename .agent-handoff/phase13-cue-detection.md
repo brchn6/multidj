@@ -1,8 +1,8 @@
 # Phase 13 Handoff — Automatic Cue Detection
 
-**Status: PLANNED — ready for implementation**
+**Status: IMPLEMENTED — on `feat/triage-player` branch, 240 tests pass**
 **Date: 2026-05-28**
-**Branch to create: `feat/cue-detection` from `dev`**
+**Branch: `feat/triage-player` (cue detection commits landed here; `feat/cue-detection` has only Tasks 0–2)**
 
 ---
 
@@ -12,14 +12,21 @@ Automatically detect musical structure (intro, verse, chorus, drop, outro, etc.)
 
 ---
 
-## Current State (what's already done)
+## Current State (FULLY IMPLEMENTED)
 
-- **Spec written:** `docs/superpowers/specs/2026-05-28-cue-detection-design.md` on `feat/embeddings-clustering` branch
-  - Access via: `git show feat/embeddings-clustering:docs/superpowers/specs/2026-05-28-cue-detection-design.md`
-- **Implementation plan written:** `docs/superpowers/plans/2026-05-28-cue-detection.md` (on `feat/triage-player`)
-- **Schema stub already exists:** `cue_points` table is in `migrations/002_cue_points.sql`. Migration 005 (adding `confidence` + `source` columns) still needs to be created.
-- **Stub test file exists:** `tests/test_analyze_cues.py` exists but uses OLD design (imports from `multidj.analyze`, wrong mock format). It must be **completely replaced** by the plan.
-- **No `multidj/cues.py` exists yet** — this is the main new module to create.
+All 9 tasks complete on branch `feat/triage-player`:
+
+- **Migration 004:** `multidj/migrations/004_cue_points_add_confidence_source.sql` — adds `confidence` + `source` columns to `cue_points`
+- **`multidj/cues.py`:** `detect_cues()`, `analyze_cues()`, `clear_cues()` fully implemented
+- **`pyproject.toml`:** `allin1>=0.1.0` added to `embeddings` extra
+- **`multidj/cli.py`:** `analyze cues` + `cues clear` subcommands wired
+- **`multidj/pipeline.py`:** `cues` is step 8 (after energy, before genres)
+- **`multidj/adapters/mixxx.py`:** `_push_cues_to_mixxx()` + wired in `full_sync()`
+- **`tests/fixtures/mixxx_factory.py`:** `cues` table in Mixxx DDL
+- **`tests/test_analyze_cues.py`:** 16 tests (6 detect_cues + 10 analyze/clear)
+- **`tests/test_mixxx_cue_sync.py`:** 4 Mixxx sync tests
+- **`tests/test_pipeline.py`:** 3 new pipeline tests added
+- **240 tests pass**
 
 ---
 
