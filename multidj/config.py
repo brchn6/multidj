@@ -84,3 +84,17 @@ def save_config(cfg: dict[str, Any], path: Path | None = None) -> None:
 def get_music_dir(cfg: dict[str, Any]) -> str | None:
     val = cfg.get("pipeline", {}).get("music_dir", "")
     return val.strip() or None
+
+
+def get_llm_config(cfg: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Return LLM config dict or None if base_url or api_key are not set."""
+    if cfg is None:
+        cfg = load_config()
+    llm = cfg.get("llm", {})
+    if not llm.get("base_url") or not llm.get("api_key"):
+        return None
+    return {
+        "base_url": llm["base_url"],
+        "api_key": llm["api_key"],
+        "model": llm.get("model", "gpt-3.5-turbo"),
+    }
