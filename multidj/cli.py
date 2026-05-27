@@ -263,6 +263,8 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Output path for HTML report (default: ./multidj_report.html)")
     p_pipeline.add_argument("--skip-report",           action="store_true", dest="skip_report",
                             help="Disable HTML report generation")
+    p_pipeline.add_argument("--limit",                 type=int, default=None,
+                            help="Cap number of tracks processed per step")
 
     # ── report ───────────────────────────────────────────────────────────────
     report_p = sub.add_parser("report", help="Generate library reports")
@@ -472,6 +474,7 @@ def main(argv: list[str] | None = None) -> int:
             skip=skip,
             report_output=args.report_output,
             skip_report=args.skip_report,
+            limit=args.limit,
         )
         emit(result, as_json=args.json)
         return 0

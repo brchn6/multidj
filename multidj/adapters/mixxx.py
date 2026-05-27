@@ -378,22 +378,17 @@ class MixxxAdapter(SyncAdapter):
         # Handle key update — only if track has a key value
         key = track.get("key")
         if key is not None:
-            row = mixxx_conn.execute(
-                "SELECT id FROM keys WHERE key_text=?", (key,)
-            ).fetchone()
-            if row is not None:
-                key_id = row[0]
-                mixxx_conn.execute(
-                    """
-                    UPDATE library SET key_id=?
-                    WHERE id=(
-                        SELECT l.id FROM library l
-                        JOIN track_locations tl ON l.location = tl.id
-                        WHERE tl.location = ?
-                    )
-                    """,
-                    (key_id, path),
+            mixxx_conn.execute(
+                """
+                UPDATE library SET key=?
+                WHERE id=(
+                    SELECT l.id FROM library l
+                    JOIN track_locations tl ON l.location = tl.id
+                    WHERE tl.location = ?
                 )
+                """,
+                (key, path),
+            )
 
         return True
 
