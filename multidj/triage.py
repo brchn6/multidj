@@ -56,3 +56,35 @@ def write_m3u(tracks: list[dict[str, Any]], path: str) -> None:
     """Write a minimal M3U playlist file with one path per line."""
     lines = ["#EXTM3U"] + [t["path"] for t in tracks]
     Path(path).write_text("\n".join(lines) + "\n")
+
+
+def tag_track(
+    db_path: str | None,
+    file_path: str,
+    rating: int,
+    hard_delete: bool = False,
+) -> None:
+    """Write a triage decision to the DB. Called by the Lua script as a subprocess.
+
+    rating=0 → soft-delete (deleted=1). hard_delete=True also removes file from disk.
+    rating 1-5 → set rating field. Unknown path is a silent no-op.
+    No dry-run gate — keypress is the apply.
+    """
+    with connect(db_path, readonly=False) as conn:
+        if rating == 0:
+            conn.execute(
+                "UPDATE tracks SET deleted = 1 WHERE path = ? AND deleted = 0",
+                (file_path,),
+            )
+            conn.commit()
+            if hard_delete:
+                try:
+                    os.unlink(file_path)
+                except OSError:
+                    pass  # file already gone — DB write still stands
+        else:
+            conn.execute(
+                "UPDATE tracks SET rating = ? WHERE path = ? AND deleted = 0",
+                (rating, file_path),
+            )
+            conn.commit()
