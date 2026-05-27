@@ -90,6 +90,11 @@
 | 9 | **Cue point detection** — librosa energy analysis → intro/drop/outro markers in DB | Planned |
 | 10 | **Mixxx cue sync** — write cue points to Mixxx `cues` table | Planned |
 | 11 | **MCP server** — expose all commands as agent-callable tools | Planned |
+| 12 | **Semantic embeddings** — CLAP encoder → sqlite-vec storage → UMAP+HDBSCAN → `Vibe/` crates | **Specced** |
+| 12b | **Similarity queries** — `multidj similar <track>` KNN search in embedding space | Planned |
+| 13 | **Playlist builder** — constraint-based sequencing (mood + BPM arc + Camelot harmonic flow) | Planned |
+| 14 | **MCP embedding/playlist tools** — expose similarity + playlist building as agent tools | Planned |
+| 15 | **Natural language DJ** — "build me a 2am dark techno set" via LLM → playlist | Vision |
 
 ---
 
