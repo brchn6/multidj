@@ -8,6 +8,13 @@ import numpy as np
 from .db import connect, ensure_not_empty
 from .embed import load_embeddings_from_db
 
+# Optional dependency — imported at module level so tests can patch multidj.cluster.OpenAI.
+# Raises RuntimeError with install instructions if openai is missing and name_cluster() is called.
+try:
+    from openai import OpenAI  # type: ignore
+except ImportError:
+    OpenAI = None  # type: ignore
+
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
@@ -60,9 +67,7 @@ def cluster_embeddings(vectors: np.ndarray, min_cluster_size: int) -> np.ndarray
 
 def name_cluster(track_samples: list[dict[str, Any]], llm_config: dict[str, Any]) -> str:
     """Call LLM to generate a 2–3 word evocative crate name for a cluster."""
-    try:
-        from openai import OpenAI  # type: ignore
-    except ImportError:
+    if OpenAI is None:
         raise RuntimeError(
             "Missing optional dependency 'embeddings'. Install with:\n\n"
             "    uv sync --extra embeddings\n"
