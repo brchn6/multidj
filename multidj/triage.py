@@ -88,3 +88,43 @@ def tag_track(
                 (rating, file_path),
             )
             conn.commit()
+
+
+def launch_session(
+    db_path: str | None,
+    crate: str | None = None,
+    limit: int | None = None,
+) -> None:
+    """Build a triage queue and launch mpv with the bundled Lua script.
+
+    Requires mpv in PATH. Blocks until mpv exits. Cleans up the temp M3U on exit.
+    """
+    if shutil.which("mpv") is None:
+        print("mpv not found — install it with: dnf install mpv", file=sys.stderr)
+        sys.exit(1)
+
+    tracks = build_triage_queue(db_path, crate=crate, limit=limit)
+    if not tracks:
+        print("No tracks to triage.")
+        sys.exit(0)
+
+    lua_path = Path(__file__).parent / "assets" / "triage.lua"
+
+    m3u_fd, m3u_path = tempfile.mkstemp(suffix=".m3u", prefix="multidj_triage_")
+    try:
+        os.close(m3u_fd)
+        write_m3u(tracks, m3u_path)
+        subprocess.run(
+            [
+                "mpv",
+                f"--playlist={m3u_path}",
+                f"--script={lua_path}",
+                "--no-video",
+            ],
+            check=False,
+        )
+    finally:
+        try:
+            os.unlink(m3u_path)
+        except OSError:
+            pass
