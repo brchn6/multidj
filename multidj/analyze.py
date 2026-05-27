@@ -1,10 +1,32 @@
 from __future__ import annotations
 
-import sys
+import contextlib
+import os
 import statistics
+import sys
 from typing import Any
 
 from .db import connect, table_exists, ensure_not_empty
+
+
+@contextlib.contextmanager
+def _suppress_decoder_noise():
+    """Suppress mpg123/ffmpeg stderr noise during audio decoding.
+
+    Some MP3 files have embedded non-audio data (cover art, ID3 tags) inside
+    the audio stream. libmpg123 prints raw warnings to stderr when it
+    encounters these, which interleave with our progress output. This context
+    manager temporarily redirects stderr to /dev/null during lib*calls.
+    """
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(old_stderr)
 
 
 def _progress(msg: str, end: str = "\n") -> None:
@@ -24,7 +46,8 @@ def detect_key(filepath: str) -> str:
     KS_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
     KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-    y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
+    with _suppress_decoder_noise():
+        y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
     chroma = np.mean(librosa.feature.chroma_cqt(y=y, sr=sr), axis=1)
     best, best_key, best_mode = -np.inf, "C", "maj"
     for i in range(12):
@@ -76,7 +99,8 @@ def detect_energy(filepath: str) -> float:
             "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
         )
 
-    y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
+    with _suppress_decoder_noise():
+        y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
     rms = float(np.mean(librosa.feature.rms(y=y)))
     centroid = float(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)))
     return rms * centroid
@@ -98,7 +122,8 @@ def detect_bpm_profile(filepath: str, window_seconds: float = 30.0) -> dict[str,
         )
 
     # Use track duration to sample three windows across the file.
-    duration = float(librosa.get_duration(path=filepath))
+    with _suppress_decoder_noise():
+        duration = float(librosa.get_duration(path=filepath))
     win = float(window_seconds)
     if duration <= 0:
         duration = win
@@ -118,7 +143,8 @@ def detect_bpm_profile(filepath: str, window_seconds: float = 30.0) -> dict[str,
 
     samples: list[float] = []
     for off in unique_offsets:
-        y, sr = librosa.load(filepath, sr=22050, mono=True, offset=off, duration=win)
+        with _suppress_decoder_noise():
+            y, sr = librosa.load(filepath, sr=22050, mono=True, offset=off, duration=win)
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
         samples.append(_to_float_tempo(tempo))
 
