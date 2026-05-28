@@ -24,3 +24,5 @@ env/
 
 # Claude Code — worktrees are ephemeral agent sandboxes, machine-specific
 .claude/worktrees/
+None
+multidj_report.html
