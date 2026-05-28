@@ -33,7 +33,7 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 
 | Command | Description |
 |---|---|
-| `pipeline` | Primary daily workflow: chains all 8 steps; `--apply`, `--skip-<step>`, `--music-dir` |
+| `pipeline` | Primary daily workflow: chains all 13 steps; `--apply`, `--skip-<step>`, `--music-dir` |
 | `import mixxx` | One-time pull from `~/.mixxx/mixxxdb.sqlite` into MultiDJ DB |
 | `import directory PATH` | Import audio files from a directory; `--apply`, `--no-backup` |
 | `sync mixxx` | Push dirty tracks + crates back to Mixxx; `--apply`, `--no-backup` |
@@ -48,6 +48,8 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 | `analyze bpm` | BPM detection via librosa across start/middle/end windows; reports variable-BPM tracks; `--apply`, `--force`, `--limit` (requires librosa) |
 | `analyze key` | Key detection via librosa; `--apply`, `--write-tags`, `--force`, `--limit` (requires librosa) |
 | `analyze energy` | Energy score (RMS × centroid, normalized 0–1); `--apply`, `--force`, `--limit` (requires librosa) |
+| `analyze cues` | Structural segmentation (intro/verse/chorus/drop/outro) via allin1 + librosa; `--apply`, `--force`, `--limit` (requires embeddings extra) |
+| `cues clear` | Remove all auto-detected cues from DB; `--apply` |
 | `crates audit` | Crate inventory and classification |
 | `crates hide/show/delete` | Bulk crate management |
 | `crates rebuild` | Rebuild all auto-crates (Genre:/BPM:/Key:/Energy:/Lang:) from config; `--apply`, `--min-tracks` |
@@ -68,10 +70,11 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 4. **`utils.py`** — `emit(data, json_mode)` for unified JSON/human output
 5. **`constants.py`** — uninformative genre list, crate classifier prefixes, shared regex patterns, `CAMELOT_KEY_MAP`, `KNOWN_ADAPTERS`
 6. **`config.py`** — `load_config()`, `save_config()`, `get_music_dir()`; reads/writes `~/.multidj/config.toml`; defaults on first run; preserves unknown sections
-7. **`pipeline.py`** — `run_pipeline()`: chains 8 steps, one backup at start, per-step error isolation, respects `skip` set
+7. **`pipeline.py`** — `run_pipeline()`: chains 13 steps (import→parse→dedupe→bpm→key→energy→cues→genres→clean_text→crates→sync→report), one backup at start, per-step error isolation, respects `skip` set
+7b. **`cues.py`** — `detect_cues(filepath, bpm)` runs allin1 (primary) + librosa (secondary cross-validation) → cue candidates; `analyze_cues()` and `clear_cues()` are the batch DB commands. All auto cues have `source='auto'`; `source='manual'` cues are never overwritten.
 8. **`models.py`** — `LibrarySummary` dataclass
 9. **`adapters/base.py`** — `SyncAdapter` ABC (`import_all`, `push_track`, `full_sync`)
-10. **`adapters/mixxx.py`** — `MixxxAdapter`: reads Mixxx DB on import, writes back on sync + crate sync; `_push_crates_to_mixxx()` reconciles stale crates and membership
+10. **`adapters/mixxx.py`** — `MixxxAdapter`: reads Mixxx DB on import, writes back on sync + crate sync; `_push_crates_to_mixxx()` reconciles stale crates; `_push_cues_to_mixxx()` writes intro (slot 0, blue) / drop (slot 1, red) / outro (slot 2, green) hot cues — high-confidence only, slots 0/1/2 wiped and repopulated each sync
 11. **`adapters/directory.py`** — `DirectoryAdapter`: imports audio files from filesystem paths
 12. **Command modules** (`scan`, `audit`, `clean`, `analyze`, `parse`, `enrich`, `crates`, `dedupe`) — pure business logic, read-only unless `--apply` is passed
 
@@ -82,6 +85,7 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 - `track_tags` — arbitrary key/value metadata per track
 - `crates` — named collections with `type` (`hand-curated` vs auto) and `show` flag
 - `crate_tracks` — many-to-many join
+- `cue_points` — per-track structural cue markers (`id`, `track_id`, `type`, `position`, `label`, `confidence` ['high'=allin1+librosa agree, 'low'=allin1 only], `source` ['auto'=machine, 'manual'=user — never overwritten])
 - `sync_state` — per-track, per-adapter dirty flag; trigger sets `dirty=1` on any `tracks` update
 
 **Key design invariants:**
@@ -97,7 +101,7 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 ## Tests and Linting
 
 ```bash
-.venv/bin/pytest tests/ -v           # full suite (132 tests)
+.venv/bin/pytest tests/ -v           # full suite (240 tests)
 .venv/bin/pytest tests/test_scan.py  # single module
 ```
 

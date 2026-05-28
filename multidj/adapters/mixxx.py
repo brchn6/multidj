@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mimetypes
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -220,6 +221,69 @@ def _push_crates_to_mixxx(
     return {"crates_created": crates_created, "tracks_pushed": tracks_pushed}
 
 
+_SAMPLE_RATE = 44100
+
+_CUE_COLORS = {
+    "intro": 0xFF0000FF,  # Blue
+    "drop":  0xFFFF0000,  # Red
+    "outro": 0xFF00FF00,  # Green
+}
+
+_CUE_HOTCUE_SLOTS = {"intro": 0, "drop": 1, "outro": 2}
+
+
+def _push_cues_to_mixxx(
+    mdj_conn: sqlite3.Connection,
+    mixxx_conn: sqlite3.Connection,
+) -> dict:
+    """Write high-confidence intro/drop/outro cues from MultiDJ to Mixxx cues table."""
+    cue_rows = mdj_conn.execute(
+        """
+        SELECT t.path, cp.type, cp.position, cp.label
+        FROM cue_points cp
+        JOIN tracks t ON cp.track_id = t.id
+        WHERE cp.type IN ('intro', 'drop', 'outro')
+          AND cp.confidence = 'high'
+          AND cp.source = 'auto'
+          AND t.deleted = 0
+        """
+    ).fetchall()
+
+    pushed = 0
+    for path, cue_type, position_secs, _ in cue_rows:
+        row = mixxx_conn.execute(
+            """
+            SELECT l.id FROM library l
+            JOIN track_locations tl ON l.location = tl.id
+            WHERE tl.location = ? AND l.mixxx_deleted = 0
+            """,
+            (path,),
+        ).fetchone()
+        if not row:
+            continue
+
+        mixxx_track_id = row[0]
+        position_frames = float(position_secs) * _SAMPLE_RATE
+        hotcue_slot = _CUE_HOTCUE_SLOTS[cue_type]
+        color = _CUE_COLORS.get(cue_type, 0xFFFFFFFF)
+        display_label = cue_type.capitalize()
+
+        mixxx_conn.execute(
+            "DELETE FROM cues WHERE track_id=? AND hotcue=?",
+            (mixxx_track_id, hotcue_slot),
+        )
+        mixxx_conn.execute(
+            """
+            INSERT INTO cues (track_id, type, position, length, hotcue, label, color)
+            VALUES (?, 1, ?, 0, ?, ?, ?)
+            """,
+            (mixxx_track_id, position_frames, hotcue_slot, display_label, color),
+        )
+        pushed += 1
+
+    return {"pushed": pushed}
+
+
 class MixxxAdapter(SyncAdapter):
     def __init__(self, mixxx_db_path: Path | None = None):
         self.mixxx_path = Path(mixxx_db_path) if mixxx_db_path else DEFAULT_MIXXX_PATH
@@ -338,15 +402,97 @@ class MixxxAdapter(SyncAdapter):
     # push_track / full_sync — implemented in Layer 3 (sync mixxx)
     # ------------------------------------------------------------------
 
+    def _ensure_track_in_mixxx(self, track: dict, mixxx_conn: sqlite3.Connection) -> bool:
+        """Insert track into Mixxx if not already present.
+
+        Populates both track_locations and library tables.
+        Returns True if inserted, False if already existed.
+        """
+        path = track.get("path")
+        if not path:
+            return False
+        exists = mixxx_conn.execute(
+            "SELECT 1 FROM track_locations WHERE location = ?", (path,)
+        ).fetchone()
+        if exists:
+            return False
+
+        dirname = str(Path(path).parent)
+        filename = Path(path).name
+        filesize = track.get("filesize", 0) or 0
+        duration = track.get("duration")
+
+        cur = mixxx_conn.execute(
+            "INSERT INTO track_locations (location, filename, directory, filesize, fs_deleted) VALUES (?, ?, ?, ?, 0)",
+            (path, filename, dirname, filesize),
+        )
+        loc_id = cur.lastrowid
+
+        ext = Path(path).suffix.lower()
+        filetype = mimetypes.guess_type(f"x{ext}")[0]
+        if not filetype:
+            filetype = ext.lstrip(".") if ext else "?"
+        else:
+            filetype = filetype.split("/")[-1]
+
+        key_val = track.get("key") or ""
+
+        mixxx_conn.execute(
+            """INSERT INTO library
+               (artist, title, album, genre, bpm, rating, timesplayed, location,
+                duration, mixxx_deleted, header_parsed, filetype, key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)""",
+            (
+                track.get("artist"),
+                track.get("title"),
+                track.get("album"),
+                track.get("genre"),
+                track.get("bpm"),
+                track.get("rating", 0),
+                track.get("play_count", 0),
+                loc_id,
+                duration,
+                filetype,
+                key_val,
+            ),
+        )
+        return True
+
+    def _sync_cover_art(self, path: str, mixxx_conn: sqlite3.Connection) -> None:
+        """Sync cover art from a .jpg/.png file alongside the audio file into Mixxx."""
+        audio_path = Path(path)
+        for ext in (".jpg", ".png"):
+            cover_path = audio_path.with_suffix(ext)
+            if cover_path.exists():
+                try:
+                    mixxx_conn.execute(
+                        """UPDATE library SET coverart_location=?
+                           WHERE id=(
+                               SELECT l.id FROM library l
+                               JOIN track_locations tl ON l.location = tl.id
+                               WHERE tl.location = ?
+                           )""",
+                        (str(cover_path), str(audio_path)),
+                    )
+                    return
+                except sqlite3.OperationalError:
+                    return
+
     def push_track(self, track: dict, mixxx_conn: sqlite3.Connection) -> bool:
         """Push one track's metadata from MultiDJ to Mixxx.
+
+        Auto-bootstraps: if the track doesn't exist in Mixxx yet, inserts
+        it into track_locations + library first, then updates metadata.
 
         track: dict with keys: id, path, artist, title, album, genre, bpm,
                rating, play_count, key (Camelot string or None)
         mixxx_conn: already-open writable connection to Mixxx DB
-        Returns True on success (at least 1 row updated), False otherwise.
+        Returns True on success, False if the track couldn't be found/inserted.
         """
         path = track.get("path")
+
+        # Bootstrap: insert into Mixxx if missing
+        self._ensure_track_in_mixxx(track, mixxx_conn)
 
         # Find the Mixxx library id by path
         cur = mixxx_conn.execute(
@@ -375,20 +521,25 @@ class MixxxAdapter(SyncAdapter):
         if not updated:
             return False
 
-        # Handle key update — only if track has a key value
+        # Handle key update — only if track has a key value and column exists
         key = track.get("key")
         if key is not None:
-            mixxx_conn.execute(
-                """
-                UPDATE library SET key=?
-                WHERE id=(
-                    SELECT l.id FROM library l
-                    JOIN track_locations tl ON l.location = tl.id
-                    WHERE tl.location = ?
+            try:
+                mixxx_conn.execute(
+                    """
+                    UPDATE library SET key=?
+                    WHERE id=(
+                        SELECT l.id FROM library l
+                        JOIN track_locations tl ON l.location = tl.id
+                        WHERE tl.location = ?
+                    )
+                    """,
+                    (key, path),
                 )
-                """,
-                (key, path),
-            )
+            except sqlite3.OperationalError:
+                pass  # no key column in older Mixxx schema
+
+        self._sync_cover_art(path, mixxx_conn)
 
         return True
 
@@ -405,7 +556,7 @@ class MixxxAdapter(SyncAdapter):
             dirty_rows = mdj_conn.execute(
                 """
                 SELECT t.id, t.path, t.artist, t.title, t.album, t.genre, t.bpm,
-                       t.rating, t.play_count, t.key
+                       t.rating, t.play_count, t.key, t.duration, t.filesize
                 FROM tracks t
                 JOIN sync_state ss ON t.id = ss.track_id
                 WHERE ss.adapter='mixxx' AND ss.dirty=1 AND t.deleted=0
@@ -451,14 +602,45 @@ class MixxxAdapter(SyncAdapter):
                             mdj_conn.commit()
                             pushed += 1
                         else:
-                            errors.append({"path": path, "reason": "path not found in Mixxx"})
+                            errors.append({"path": path, "reason": "push_track returned False"})
                     except Exception as exc:  # noqa: BLE001
                         try:
                             mixxx_conn.rollback()
                         except Exception:
                             pass
                         errors.append({"path": path, "reason": str(exc)})
+                # Sync cover art for all active tracks (not just dirty ones)
+                cover_art_linked = 0
+                with connect(str(multidj_db_path), readonly=True) as mdj_ro:
+                    all_paths = mdj_ro.execute(
+                        "SELECT path FROM tracks WHERE deleted = 0 AND path IS NOT NULL"
+                    ).fetchall()
+                for row in all_paths:
+                    path = row["path"] if isinstance(row, sqlite3.Row) else row[0]
+                    audio_path = Path(path)
+                    for ext in (".jpg", ".png"):
+                        cover_path = audio_path.with_suffix(ext)
+                        if cover_path.exists():
+                            try:
+                                mixxx_conn.execute(
+                                    """UPDATE library SET coverart_location = ?
+                                       WHERE id = (
+                                           SELECT l.id FROM library l
+                                           JOIN track_locations tl ON l.location = tl.id
+                                           WHERE tl.location = ?
+                                       )""",
+                                    (str(cover_path), path),
+                                )
+                                mixxx_conn.commit()
+                                cover_art_linked += 1
+                            except sqlite3.OperationalError:
+                                pass
+                            break
+
                 crate_result = _push_crates_to_mixxx(mdj_conn, mixxx_conn)
+                # Reconcile cue hot cue slots 0/1/2 — MultiDJ is source of truth
+                mixxx_conn.execute("DELETE FROM cues WHERE hotcue IN (0, 1, 2)")
+                cue_result = _push_cues_to_mixxx(mdj_conn, mixxx_conn)
                 mixxx_conn.commit()
         finally:
             mixxx_conn.close()
@@ -467,7 +649,9 @@ class MixxxAdapter(SyncAdapter):
             "mode":               "apply",
             "total_dirty":        len(dirty_tracks),
             "pushed":             pushed,
+            "cover_art_linked": cover_art_linked,
             "errors":             errors,
             "crates_created":      crate_result["crates_created"],
             "crate_tracks_pushed": crate_result["tracks_pushed"],
+            "cues_pushed":         cue_result.get("pushed", 0),
         }

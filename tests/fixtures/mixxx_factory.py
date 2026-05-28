@@ -54,6 +54,17 @@ CREATE TABLE IF NOT EXISTS crate_tracks (
     track_id  INTEGER NOT NULL,
     PRIMARY KEY (crate_id, track_id)
 );
+
+CREATE TABLE IF NOT EXISTS cues (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id   INTEGER NOT NULL,
+    type       INTEGER NOT NULL DEFAULT 1,
+    position   REAL NOT NULL DEFAULT -1,
+    length     REAL NOT NULL DEFAULT 0,
+    hotcue     INTEGER NOT NULL DEFAULT -1,
+    label      TEXT NOT NULL DEFAULT '',
+    color      INTEGER NOT NULL DEFAULT 4294967295
+);
 """
 
 
