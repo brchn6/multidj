@@ -123,7 +123,7 @@ def analyze_embed(
     limit: int | None = None,
     backup_dir: str | None | bool = None,
 ) -> dict[str, Any]:
-    # Ensure migration 004 (embeddings table) is applied before reading.
+    # Ensure migration 005 (embeddings table) is applied before reading.
     with connect(db_path, readonly=False) as _:
         pass
     with connect(db_path, readonly=True) as conn:
