@@ -1,9 +1,32 @@
 from __future__ import annotations
 
+import contextlib
+import os
+import statistics
 import sys
 from typing import Any
 
 from .db import connect, table_exists, ensure_not_empty
+
+
+@contextlib.contextmanager
+def _suppress_decoder_noise():
+    """Suppress mpg123/ffmpeg stderr noise during audio decoding.
+
+    Some MP3 files have embedded non-audio data (cover art, ID3 tags) inside
+    the audio stream. libmpg123 prints raw warnings to stderr when it
+    encounters these, which interleave with our progress output. This context
+    manager temporarily redirects stderr to /dev/null during lib*calls.
+    """
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    try:
+        yield
+    finally:
+        os.dup2(old_stderr, 2)
+        os.close(old_stderr)
 
 
 def _progress(msg: str, end: str = "\n") -> None:
@@ -15,13 +38,16 @@ def detect_key(filepath: str) -> str:
         import librosa  # type: ignore
         import numpy as np  # type: ignore
     except ImportError:
-        raise ImportError("Key analysis requires: pip install librosa mutagen")
+        raise RuntimeError(
+            "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
+        )
 
     KS_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
     KS_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
     KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-    y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
+    with _suppress_decoder_noise():
+        y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
     chroma = np.mean(librosa.feature.chroma_cqt(y=y, sr=sr), axis=1)
     best, best_key, best_mode = -np.inf, "C", "maj"
     for i in range(12):
@@ -37,7 +63,9 @@ def _write_tag(filepath: str, key: str) -> None:
     try:
         import mutagen  # type: ignore  # noqa: F401
     except ImportError:
-        raise ImportError("Key analysis requires: pip install librosa mutagen")
+        raise RuntimeError(
+            "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
+        )
 
     import mutagen.id3 as id3  # type: ignore
     import mutagen.flac as flac_mod  # type: ignore
@@ -67,26 +95,77 @@ def detect_energy(filepath: str) -> float:
         import librosa  # type: ignore
         import numpy as np  # type: ignore
     except ImportError:
-        raise ImportError("Energy analysis requires: pip install librosa")
+        raise RuntimeError(
+            "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
+        )
 
-    y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
+    with _suppress_decoder_noise():
+        y, sr = librosa.load(filepath, sr=22050, mono=True, duration=60)
     rms = float(np.mean(librosa.feature.rms(y=y)))
     centroid = float(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)))
     return rms * centroid
 
 
-def detect_bpm(filepath: str) -> float:
-    """Detect tempo in BPM from audio file using librosa beat tracker."""
+def _to_float_tempo(tempo: Any) -> float:
+    if hasattr(tempo, "__len__"):
+        return float(tempo[0])
+    return float(tempo)
+
+
+def detect_bpm_profile(filepath: str, window_seconds: float = 30.0) -> dict[str, Any]:
+    """Detect BPM from start/middle/end windows and report variability."""
     try:
         import librosa  # type: ignore
     except ImportError:
-        raise ImportError("BPM analysis requires: pip install librosa")
-    y, sr = librosa.load(filepath, sr=22050, mono=True, duration=30)
-    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-    # librosa may return an array for tempo in newer versions
-    if hasattr(tempo, '__len__'):
-        tempo = float(tempo[0])
-    return float(tempo)
+        raise RuntimeError(
+            "Missing optional dependency 'analysis'. Install with:\n\n    uv sync --extra analysis\n"
+        )
+
+    # Use track duration to sample three windows across the file.
+    with _suppress_decoder_noise():
+        duration = float(librosa.get_duration(path=filepath))
+    win = float(window_seconds)
+    if duration <= 0:
+        duration = win
+
+    offsets: list[float] = [0.0]
+    if duration > win:
+        offsets.append(max((duration / 2.0) - (win / 2.0), 0.0))
+        offsets.append(max(duration - win, 0.0))
+
+    unique_offsets: list[float] = []
+    seen: set[float] = set()
+    for off in offsets:
+        key = round(off, 3)
+        if key not in seen:
+            seen.add(key)
+            unique_offsets.append(off)
+
+    samples: list[float] = []
+    for off in unique_offsets:
+        with _suppress_decoder_noise():
+            y, sr = librosa.load(filepath, sr=22050, mono=True, offset=off, duration=win)
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        samples.append(_to_float_tempo(tempo))
+
+    bpm = float(statistics.median(samples))
+    bpm_min = float(min(samples))
+    bpm_max = float(max(samples))
+    bpm_range = bpm_max - bpm_min
+    is_variable = bpm_range >= 6.0
+
+    return {
+        "bpm": bpm,
+        "bpm_samples": samples,
+        "sample_offsets": unique_offsets,
+        "bpm_range": bpm_range,
+        "is_variable": is_variable,
+    }
+
+
+def detect_bpm(filepath: str) -> float:
+    """Backwards-compatible BPM API returning the representative tempo."""
+    return float(detect_bpm_profile(filepath)["bpm"])
 
 
 def analyze_bpm(
@@ -137,6 +216,7 @@ def analyze_bpm(
 
     db_updates: list[tuple[float, int]] = []
     error_details: list[dict] = []
+    variable_bpm_details: list[dict[str, Any]] = []
     succeeded = 0
     total = len(rows)
 
@@ -146,10 +226,23 @@ def analyze_bpm(
         label = f"{row['artist'] or ''} - {row['title'] or ''}".strip(" -") or row["filepath"]
         _progress(f"[{i:{len(str(total))}}/{total}] {label[:60]}", end="")
         try:
-            bpm = detect_bpm(row["filepath"])
+            bpm_profile = detect_bpm_profile(row["filepath"])
+            bpm = float(bpm_profile["bpm"])
             db_updates.append((bpm, row["id"]))
+            if bpm_profile["is_variable"]:
+                variable_bpm_details.append({
+                    "track_id": row["id"],
+                    "artist": row["artist"],
+                    "title": row["title"],
+                    "filepath": row["filepath"],
+                    "bpm": bpm,
+                    "bpm_samples": bpm_profile["bpm_samples"],
+                    "sample_offsets": bpm_profile["sample_offsets"],
+                    "bpm_range": bpm_profile["bpm_range"],
+                })
             succeeded += 1
-            _progress(f"  → {bpm:.1f}")
+            variability_suffix = " (variable)" if bpm_profile["is_variable"] else ""
+            _progress(f"  → {bpm:.1f}{variability_suffix}")
         except ImportError:
             raise
         except Exception as exc:
@@ -168,6 +261,8 @@ def analyze_bpm(
         "processed": total,
         "succeeded": succeeded,
         "errors": len(error_details),
+        "variable_bpm_tracks": len(variable_bpm_details),
+        "variable_bpm_details": variable_bpm_details,
         "error_details": error_details,
     }
 

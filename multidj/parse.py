@@ -10,6 +10,12 @@ from .db import connect, table_exists, ensure_not_empty
 
 _ACTIVE = "deleted = 0"
 
+# Values that are clearly junk and should never be proposed as artist/title.
+_JUNK_VALUE_RE = re.compile(
+    r"^\s*(\d+|free\s*(dl|download)?|dl|download|free)\s*$",
+    re.IGNORECASE,
+)
+
 # Remix/edit/bootleg/flip inside parens or brackets.
 _REMIX_RE = re.compile(
     r"[\(\[]\s*(.+?)\s+"
@@ -218,6 +224,9 @@ def parse_library(
             new_val = parsed[field]
             current_val = row[field] or ""
             if new_val and (not current_val or force) and new_val != current_val:
+                # Skip proposals that are clearly noise/junk values.
+                if _JUNK_VALUE_RE.match(new_val):
+                    continue
                 change[f"old_{field}"] = current_val or None
                 change[f"new_{field}"] = new_val
                 has_change = True

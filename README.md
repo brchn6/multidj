@@ -7,50 +7,152 @@ Designed for agent-operated workflows: JSON output, dry-run defaults, per-track 
 ## Install
 
 ```bash
-pip install -e .
+uv sync
 multidj --help
 ```
 
 Optional audio analysis (BPM, key, energy detection):
 ```bash
-pip install librosa mutagen
+uv sync --extra analysis
 ```
 
-## Quick start
+The `analysis` extra enables BPM, key, and energy detection in analyze commands.
+
+## How MultiDJ uses two databases
+
+MultiDJ keeps **its own database** separate from Mixxx:
+
+| Database | Default path | Purpose |
+|---|---|---|
+| **MultiDJ DB** | `~/.multidj/library.sqlite` | Source of truth — all metadata, crates, BPM/key/energy |
+| **Mixxx DB** | `~/.mixxx/mixxxdb.sqlite` | Read on import; written to on sync |
+
+You never pass the Mixxx DB as `--db`. The `--db` flag (or `multidj config set-db`) always refers to the MultiDJ DB.
+
+## First-time setup
 
 ```bash
-# One-time: import your Mixxx library into MultiDJ
+# 1. Import your Mixxx library into the MultiDJ DB (reads Mixxx, writes to ~/.multidj/library.sqlite)
 multidj import mixxx --apply
 
-# Or import directly from your music folder (no Mixxx required)
-multidj import directory ~/Music/All_Tracks --apply
-
-# Run the full pipeline: import new tracks → analyze → rebuild crates → sync to Mixxx
-multidj pipeline --apply
-
-# Push everything back to Mixxx (tracks + crates)
-multidj sync mixxx --apply
+# 2. (Optional) Store your Mixxx DB path in config so --mixxx-db is automatic
+multidj config set-db ~/.multidj/library.sqlite   # only needed if you want a non-default path
 ```
+
+If you don't use Mixxx, import directly from your music folder:
+
+```bash
+multidj import directory ~/Music/All_Tracks --apply
+```
+
+## Daily workflow
+
+```bash
+# Full pipeline: import new tracks → clean → analyze → rebuild crates → sync to Mixxx
+multidj pipeline --apply \
+  --music-dir ~/Music/All_Tracks \
+  --mixxx-db ~/.mixxx/mixxxdb.sqlite
+
+# Dry-run first to preview what would change
+multidj pipeline \
+  --music-dir ~/Music/All_Tracks \
+  --mixxx-db ~/.mixxx/mixxxdb.sqlite
+```
+
+`--music-dir` and `--mixxx-db` are both optional:
+- Omit `--music-dir` to skip the directory import step
+- Omit `--mixxx-db` to skip the Mixxx sync step
 
 ## The pipeline
 
-`multidj pipeline` is the primary daily workflow command. It chains all steps in order:
+`multidj pipeline` chains all steps in order:
 
 ```
-import directory → parse → analyze bpm → analyze key → analyze energy
-→ clean genres → crates rebuild → sync mixxx
+import directory → fix mismatches → parse → dedupe
+→ analyze bpm → analyze key → analyze energy
+→ clean genres → clean text → crates rebuild → sync mixxx → report
 ```
 
 ```bash
-multidj pipeline              # dry-run: preview all steps
 multidj pipeline --apply      # execute everything
+multidj pipeline              # dry-run: preview without writing
 
 # Skip individual steps
 multidj pipeline --apply --skip-bpm --skip-key
 multidj pipeline --apply --skip-sync   # rebuild crates without touching Mixxx
 
-# Analyze from a specific directory this run
-multidj pipeline --apply --music-dir /Volumes/USB/NewPurchases
+# Write report to custom path
+multidj pipeline --apply --report-output /path/to/report.html
+
+# Disable report generation
+multidj pipeline --skip-report
+```
+
+### Interactive Dashboard Report (auto-generated)
+
+The pipeline now generates a standalone interactive dashboard report:
+
+```bash
+multidj pipeline --apply
+```
+
+Default output:
+
+```text
+./multidj_report.html
+```
+
+Options:
+
+```bash
+multidj pipeline --report-output /path/to/report.html
+multidj pipeline --skip-report
+```
+
+The dashboard includes track counts, metadata coverage, top genres, crate exploration,
+and crate track harmonic transition indicators.
+
+Generate dashboard directly (read-only, no --apply required):
+
+```bash
+multidj report dashboard
+multidj report dashboard --output /path/to/report.html
+```
+
+### Report-only run
+
+If you want to generate only the HTML report (without running import/analyze/clean/crates/sync),
+skip all pipeline processing steps and keep the report step enabled:
+
+```bash
+multidj pipeline \
+    --skip-import \
+    --skip-fix-mismatches \
+    --skip-parse \
+    --skip-bpm \
+    --skip-key \
+    --skip-energy \
+    --skip-genres \
+    --skip-clean-text \
+    --skip-crates \
+    --skip-sync
+```
+
+Custom output path:
+
+```bash
+multidj pipeline \
+    --skip-import \
+    --skip-fix-mismatches \
+    --skip-parse \
+    --skip-bpm \
+    --skip-key \
+    --skip-energy \
+    --skip-genres \
+    --skip-clean-text \
+    --skip-crates \
+    --skip-sync \
+    --report-output /path/to/report.html
 ```
 
 On first run, MultiDJ will ask for your music directory and save it to `~/.multidj/config.toml`.
@@ -118,15 +220,15 @@ multidj clean genres             # dry-run: case variants, uninformative → NUL
 multidj clean genres --apply
 multidj clean genres --limit 50
 
-multidj clean text               # dry-run: strip/collapse whitespace in artist/title/album
+multidj clean text               # dry-run: clean artist/title/album text + remove mapped title/artist suffix garbage
 multidj clean text --apply
 ```
 
-### Analyze (requires `pip install librosa mutagen`)
+### Analyze (requires `uv sync --extra analysis`)
 
 ```bash
 multidj analyze bpm              # dry-run: list tracks needing BPM
-multidj analyze bpm --apply      # detect BPM and write to DB
+multidj analyze bpm --apply      # detect BPM from start/middle/end windows; report variable-BPM tracks
 multidj analyze bpm --force      # reprocess tracks that already have BPM
 
 multidj analyze key              # dry-run: list candidates
@@ -153,6 +255,30 @@ multidj parse --force            # overwrite already-tagged fields
 ```bash
 multidj enrich language          # detect Hebrew tracks (Unicode range check)
 ```
+
+### Report
+
+```bash
+multidj report dashboard                 # generate interactive standalone dashboard
+multidj report dashboard --output report.html
+```
+
+This command is read-only and respects `--db`.
+
+### Harmonic Validation (experimental)
+
+Dashboard crate views include Camelot-based transition analysis between adjacent tracks:
+
+- ✅ compatible: same key or +/- 1 step on same A/B ring
+- ⚠️ risky: relative major/minor (same number, A/B swap)
+- ❌ incompatible: all other transitions
+
+Current phase is analysis + visualization only:
+
+- No DB schema changes
+- No automatic crate mutation
+- No pipeline enforcement of harmonic rules
+- UI reordering/flags are local to the dashboard session (not persisted yet)
 
 ### Crates
 
@@ -228,7 +354,8 @@ MultiDJ owns `~/.multidj/library.sqlite`. Mixxx is a sync target, not a source.
 multidj/
 ├── cli.py              — argparse entry point, global flag hoisting, subcommand dispatch
 ├── config.py           — load/save ~/.multidj/config.toml, first-run prompt
-├── pipeline.py         — run_pipeline(): chains all 8 steps, single backup, step isolation
+├── pipeline.py         — run_pipeline(): chains 11 steps including HTML report, single backup, step isolation
+├── report.py           — write_html_report(): static HTML dashboard from active track metrics
 ├── db.py               — connect(), resolve_db_path(), migration runner
 ├── backup.py           — create_backup() — timestamped copies to ~/.multidj/backups/
 ├── models.py           — LibrarySummary dataclass
@@ -289,3 +416,16 @@ pytest tests/test_pipeline.py -v   # single module
 | `~/.multidj/config.toml` | User configuration (crate dimensions, music dir) |
 | `~/.multidj/backups/` | Timestamped backups |
 | `~/.mixxx/mixxxdb.sqlite` | Mixxx DB (read on import, written on sync) |
+
+## Repository Sync Note (2026-04-30)
+
+- Clean text behavior now strips promotional noise markers from artist/title tails, including free, dl, and download variants.
+- BPM analysis now samples start/middle/end windows and reports variable-tempo cases instead of hiding half/double-time ambiguity.
+- Directory import now includes artist-title swap mismatch detection for stronger metadata hygiene during ingestion.
+- Directory import now soft-deletes (`deleted=1`) tracks whose files no longer exist on disk after a rescan.
+- Pipeline expanded to 10 steps: `fix_mismatches` (step 2) auto-corrects artist/title swaps across all active tracks; `clean_text` (step 8) strips promo markers from artist/title/album.
+- Added persistent DB path config: `multidj config set-db <path>` stores `[db].path`, and commands now use it when `--db` is omitted.
+- Parse now skips junk artist/title proposals (numeric-only and `free`/`dl`/`download` marker values) to reduce bad suggestions in common use.
+- Added `multidj report dashboard` for standalone interactive HTML dashboard output with optional `--output` path.
+- Pipeline report step now generates the interactive dashboard by default while remaining read-only and non-fatal.
+- Added experimental Camelot harmonic transition analysis/visualization in crate views (UI-only interactions, no DB persistence).

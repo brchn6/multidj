@@ -96,6 +96,7 @@ def dedupe(
     by: str = "both",
     apply: bool = False,
     backup: bool = True,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     with connect(db_path, readonly=True) as conn:
         if table_exists(conn, "library") and not table_exists(conn, "tracks"):
@@ -146,6 +147,9 @@ def dedupe(
                 for d in new_dups
             ],
         })
+
+    if limit is not None:
+        removed_ids = removed_ids[:limit]
 
     if apply and removed_ids:
         if backup:

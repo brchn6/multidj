@@ -32,9 +32,9 @@
 - [x] `audit genres` — genre distribution, case collisions, emoji/uninformative detection (`--top N`)
 - [x] `audit metadata` — field coverage percentages across active tracks
 - [x] `clean genres` — dry-run/apply: case normalization, uninformative → NULL, whitespace (`--limit`, `--no-backup`)
-- [x] `clean text` — dry-run/apply: whitespace strip/collapse in artist/title/album
+- [x] `clean text` — dry-run/apply: whitespace strip/collapse + mapped trailing garbage cleanup in title/artist
 - [x] `import directory` — scan a directory for audio files and import into MultiDJ DB; `--apply`, `--no-backup`
-- [x] `analyze bpm` — librosa beat tracking; `--apply`, `--force`, `--limit`, `--no-backup`; per-track error isolation
+- [x] `analyze bpm` — librosa beat tracking sampled across start/middle/end windows; reports variable-BPM tracks; `--apply`, `--force`, `--limit`, `--no-backup`; per-track error isolation
 - [x] `analyze key` — Krumhansl-Schmuckler key detection via librosa/chroma; `--apply`, `--write-tags`, `--no-sync-db`, `--force`, `--limit`
 - [x] `analyze energy` — librosa RMS × spectral centroid, min-max normalized 0–1; `--apply`, `--force`, `--limit`, `--no-backup`
 - [x] `pipeline` — chains import→parse→bpm→key→energy→clean genres→crates rebuild→sync; `--apply`, `--skip-*` per step, `--music-dir`
@@ -44,6 +44,7 @@
 - [x] `crates delete` — permanent delete of auto crates + their track assignments, `--apply`
 - [x] `crates rebuild` — delete all auto-crates, recreate from current DB; config-driven dimensions: Genre:/Lang:/BPM:/Key:/Energy:; `--min-tracks`, `--apply`
 - [x] `dedupe` — artist+title and filesize+duration matching; keeper = most-played → highest-rated → largest; `--by`, `--apply`
+- [x] `triage` — mpv-based keyboard audition: KP0=soft-delete, Shift+KP0=hard-delete (rm file), KP1–5=rating, n=skip; `--crate`, `--limit`; `triage tag --hard-delete` write subcommand called by Lua
 - [x] `parse` — extract artist/title/remixer/featuring from filenames; confidence tiers (high/medium/low); `--apply`, `--force`, `--min-confidence`, `--limit`
 - [x] `enrich language` — detect Hebrew tracks by Unicode range (U+0590–U+05FF, U+FB1D–U+FB4F); read-only report
 
@@ -90,6 +91,12 @@
 | 9 | **Cue point detection** — librosa energy analysis → intro/drop/outro markers in DB | Planned |
 | 10 | **Mixxx cue sync** — write cue points to Mixxx `cues` table | Planned |
 | 11 | **MCP server** — expose all commands as agent-callable tools | Planned |
+| 12 | **Semantic embeddings** — CLAP encoder → sqlite-vec storage → UMAP+HDBSCAN → `Vibe/` crates | **Specced** |
+| 12b | **Similarity queries** — `multidj similar <track>` KNN search in embedding space | Planned |
+| 13 | **Playlist builder** — constraint-based sequencing (mood + BPM arc + Camelot harmonic flow) | Planned |
+| 14 | **MCP embedding/playlist tools** — expose similarity + playlist building as agent tools | Planned |
+| 15 | **Natural language DJ** — "build me a 2am dark techno set" via LLM → playlist | Vision |
+| 16 | **Triage player** — `multidj triage` mpv + Lua keyboard-driven track audition; KP0=soft-delete, Shift+KP0=hard-delete, KP1–5=rating | **Done** |
 
 ---
 
@@ -190,3 +197,20 @@ multidj enrich language
 # Testing
 .venv/bin/pytest tests/ -v   # 132 tests
 ```
+
+## Repository Sync Note (2026-04-30)
+
+- Clean text behavior now strips promotional noise markers from artist/title tails, including free, dl, and download variants.
+- BPM analysis now samples start/middle/end windows and reports variable-tempo cases instead of hiding half/double-time ambiguity.
+- Directory import now includes artist-title swap mismatch detection for stronger metadata hygiene during ingestion.
+- Directory import now soft-deletes (`deleted=1`) tracks whose files no longer exist on disk after a rescan.
+- Pipeline expanded to 10 steps: `fix_mismatches` (step 2) auto-corrects artist/title swaps across all active tracks; `clean_text` (step 8) strips promo markers from artist/title/album.
+- Added persistent DB path config: `multidj config set-db <path>` stores `[db].path`, and commands now use it when `--db` is omitted.
+- Parse now skips junk artist/title proposals (numeric-only and `free`/`dl`/`download` marker values) to reduce bad suggestions in common use.
+- Added `multidj report dashboard` for standalone interactive HTML dashboard output with optional `--output` path.
+- Pipeline report step now generates the interactive dashboard by default while remaining read-only and non-fatal.
+- Added experimental Camelot harmonic transition analysis/visualization in crate views (UI-only interactions, no DB persistence).
+
+## Repository Sync Note (2026-05-05)
+
+- `sync mixxx` key handling fixed: writes Camelot string directly to `library.key` (VARCHAR(8)) instead of looking up a non-existent `keys` table. Previous versions assumed a `keys` table with `key_text` column and `key_id` FK on `library`, which doesn't exist in modern Mixxx installs. Now pushes keys directly, resolving the `no such table: keys` error that blocked all track syncs.
