@@ -68,7 +68,7 @@ EMOJI_OR_SYMBOL_RE = re.compile(r"^[^\w\s]+$", re.UNICODE)
 
 # Crate names that are auto-generated (not hand-curated).
 # Matched against the start of the crate name.
-AUTO_CRATE_PREFIXES = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s|Key:\s|Energy:\s)", re.IGNORECASE)
+AUTO_CRATE_PREFIXES = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s|Key:\s|Energy:\s|Vibe/)", re.IGNORECASE)
 
 # Crate names that are special catch-alls (not meaningful collections).
 CATCH_ALL_CRATE_NAMES: frozenset[str] = frozenset({"New Crate"})
@@ -95,7 +95,7 @@ DUPLICATE_SUFFIX_RE = re.compile(r"\.\d+$")
 
 # Auto-crate prefixes for rebuild operations (superset of AUTO_CRATE_PREFIXES).
 # Matches Genre:, BPM:, Lang: prefixes (case-insensitive).
-REBUILD_CRATE_RE = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s|Key:\s|Energy:\s)", re.IGNORECASE)
+REBUILD_CRATE_RE = re.compile(r"^(Genre:\s|BPM:\s|Lang:\s|Key:\s|Energy:\s|Vibe/)", re.IGNORECASE)
 
 # Adapters registered in the sync_state table.
 # import directory inserts dirty=1 rows for every adapter in this list.

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sqlite3
 from tests.fixtures.multidj_factory import make_multidj_db
 
@@ -16,3 +18,14 @@ def test_cue_points_schema(tmp_path):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(cue_points)").fetchall()}
     conn.close()
     assert cols == {"id", "track_id", "type", "position", "label", "color", "created_at", "confidence", "source"}
+
+
+def test_embeddings_table_created(tmp_path):
+    from multidj.db import connect
+    db = tmp_path / "library.sqlite"
+    with connect(str(db), readonly=False) as conn:
+        pass  # migrations apply on connect
+    raw = sqlite3.connect(str(db))
+    tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    raw.close()
+    assert "embeddings" in tables

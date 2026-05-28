@@ -62,7 +62,31 @@
 - [x] `tests/test_config.py` — 7 tests (defaults created, load/save, toggles, unknown section preservation)
 - [x] `tests/test_mixxx_crate_sync.py` — 4 tests (crates pushed, stale deletion, membership reconciliation)
 - [x] `tests/test_pipeline.py` — 5 tests (dry-run, apply, --skip-*, single backup, step isolation)
-- [x] **132 tests passing**
+- [x] `tests/test_embed.py` — 11 tests (storage, dry-run, force, incremental, find_similar, error isolation)
+- [x] `tests/test_cluster.py` — 10 tests (cluster_embeddings, cluster_vibe, LLM naming, noise tracks, crate writing)
+- [x] `tests/test_llm_config.py` — 5 tests (get_llm_config: missing, partial, full, model default, config isolation)
+- [x] **232 tests passing** (7 pre-existing failures in `test_analyze_cues.py` — Phase 9 not yet implemented)
+
+### Phase 12 — Semantic Embeddings + Clustering (2026-05-27)
+- [x] `multidj/migrations/004_embeddings.sql` — `embeddings` table: `(track_id PK, model_name, vector BLOB, created_at)`
+- [x] `multidj/embed.py` — `analyze_embed()`, `find_similar()`, `load_clap_model()`, `store_embedding()`, `load_embeddings_from_db()`
+  - Model: `laion/larger_clap_music` (512-dim float32 vectors)
+  - 3-window sampling: start / mid / end × 30 s, mean-pooled
+  - Incremental: skips already-embedded tracks; `--force` to redo all
+  - Per-track error isolation — one bad file never kills the batch
+  - Requires `uv sync --extra embeddings` (torch, transformers, librosa, umap-learn, hdbscan, openai)
+- [x] `multidj/cluster.py` — `cluster_embeddings()`, `cluster_vibe()`, `name_cluster()`
+  - UMAP: 512d → 10d (cosine metric, `random_state=42`, PCA init for stability with small N)
+  - HDBSCAN: automatic cluster count, noise → `Vibe/Unclassified`
+  - LLM naming: OpenAI-compatible API via `[llm]` config; fallback to `Vibe/Cluster-NN`
+  - Clear-and-rebuild lifecycle for `Vibe/` crates
+- [x] `multidj analyze embed --apply [--force] [--limit N]`
+- [x] `multidj cluster vibe --apply [--min-cluster-size N]`
+- [x] `multidj similar <track> [--top N]` — KNN cosine distance, pure numpy, read-only
+- [x] Pipeline steps 8 (embed) + 9 (cluster) added; `--skip-embed`, `--skip-cluster` flags
+- [x] `get_llm_config()` in `config.py` — reads `[llm].base_url/api_key/model`
+- [x] `Vibe/` added to `AUTO_CRATE_PREFIXES` + `REBUILD_CRATE_RE` in `constants.py`
+- [x] **PoC verified (2026-05-27):** 35 tracks encoded at 512-dim on CPU (~2 min/track), 3 UMAP/HDBSCAN clusters found, 4 `Vibe/` crates written, `multidj similar` returning ranked cosine-distance results
 
 ### Safety Model
 - [x] All commands dry-run by default; nothing written without `--apply`
@@ -91,8 +115,8 @@
 | 9 | **Cue point detection** — librosa energy analysis → intro/drop/outro markers in DB | Planned |
 | 10 | **Mixxx cue sync** — write cue points to Mixxx `cues` table | Planned |
 | 11 | **MCP server** — expose all commands as agent-callable tools | Planned |
-| 12 | **Semantic embeddings** — CLAP encoder → sqlite-vec storage → UMAP+HDBSCAN → `Vibe/` crates | **Specced** |
-| 12b | **Similarity queries** — `multidj similar <track>` KNN search in embedding space | Planned |
+| 12 | **Semantic embeddings** — CLAP encoder → SQLite BLOB storage → UMAP+HDBSCAN → `Vibe/` crates | **Done** |
+| 12b | **Similarity queries** — `multidj similar <track>` KNN search in embedding space | **Done** |
 | 13 | **Playlist builder** — constraint-based sequencing (mood + BPM arc + Camelot harmonic flow) | Planned |
 | 14 | **MCP embedding/playlist tools** — expose similarity + playlist building as agent tools | Planned |
 | 15 | **Natural language DJ** — "build me a 2am dark techno set" via LLM → playlist | Vision |

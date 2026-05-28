@@ -186,6 +186,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force",       action="store_true", help="Overwrite existing key values")
     p.add_argument("--verbose", "-v", action="store_true", help="Show detected key for each track")
 
+    p_embed = analyze_sub.add_parser("embed", help="Encode tracks as CLAP audio embeddings")
+    p_embed.add_argument("--apply",     action="store_true", help="Write embeddings (default: dry-run)")
+    p_embed.add_argument("--force",     action="store_true", help="Re-encode already-embedded tracks")
+    p_embed.add_argument("--limit",     type=int, default=None, help="Cap number of tracks to process")
+    p_embed.add_argument("--no-backup", action="store_true", dest="no_backup")
+
     p_cues = analyze_sub.add_parser("cues", help="Detect structural cues (intro/verse/chorus/drop/outro)")
     p_cues.add_argument("--apply", action="store_true", help="Write cues to DB (default: dry-run)")
     p_cues.add_argument("--force", action="store_true", help="Re-analyze tracks that already have cues")
@@ -236,6 +242,24 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Soft-delete duplicates (sets mixxx_deleted=1, reversible)")
     p.add_argument("--no-backup", action="store_true", help="Skip backup before apply")
 
+    # ── cluster ──────────────────────────────────────────────────────────────
+    cluster_p = sub.add_parser("cluster", help="Cluster tracks by embedding similarity")
+    cluster_sub = cluster_p.add_subparsers(dest="cluster_target", required=True)
+
+    p_vibe = cluster_sub.add_parser("vibe", help="Build Vibe/ crates from CLAP embedding clusters")
+    p_vibe.add_argument("--apply",            action="store_true", help="Write Vibe/ crates to DB")
+    p_vibe.add_argument("--min-cluster-size", type=int, default=5, dest="min_cluster_size",
+                        help="Minimum tracks per cluster (default: 5)")
+    p_vibe.add_argument("--prefix",           default="Vibe/", help="Crate name prefix (default: Vibe/)")
+    p_vibe.add_argument("--no-backup",        action="store_true", dest="no_backup")
+
+    # ── similar ───────────────────────────────────────────────────────────────
+    p_similar = sub.add_parser("similar", help="Find tracks similar to a given track by embedding distance")
+    p_similar.add_argument("track_ref", metavar="TRACK",
+                           help="File path or 'Artist - Title' search string")
+    p_similar.add_argument("--top", type=int, default=10, dest="top_n",
+                           help="Number of similar tracks to return (default: 10)")
+
     # ── import ────────────────────────────────────────────────────────────────
     import_p = sub.add_parser("import", help="Import tracks from external sources")
     import_sub = import_p.add_subparsers(dest="import_target", required=True)
@@ -269,6 +293,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipeline.add_argument("--skip-bpm",              action="store_true", dest="skip_bpm")
     p_pipeline.add_argument("--skip-key",              action="store_true", dest="skip_key")
     p_pipeline.add_argument("--skip-energy",           action="store_true", dest="skip_energy")
+    p_pipeline.add_argument("--skip-embed",            action="store_true", dest="skip_embed")
+    p_pipeline.add_argument("--skip-cluster",          action="store_true", dest="skip_cluster")
     p_pipeline.add_argument("--skip-cues",             action="store_true", dest="skip_cues")
     p_pipeline.add_argument("--skip-genres",           action="store_true", dest="skip_genres")
     p_pipeline.add_argument("--skip-clean-text",       action="store_true", dest="skip_clean_text")
@@ -393,6 +419,15 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
                 backup_dir=False if args.no_backup else None,
             )
+        elif args.analyze_target == "embed":
+            from .embed import analyze_embed
+            result = analyze_embed(
+                db_path=args.db,
+                apply=args.apply,
+                force=args.force,
+                limit=args.limit,
+                backup_dir=False if args.no_backup else None,
+            )
         elif args.analyze_target == "key":
             result = analyze_key(
                 args.db,
@@ -448,6 +483,31 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "dedupe":
         result = dedupe(args.db, by=args.by, apply=args.apply, backup=not args.no_backup)
 
+    elif args.command == "cluster":
+        if args.cluster_target == "vibe":
+            from .cluster import cluster_vibe
+            from .config import get_llm_config
+            try:
+                result = cluster_vibe(
+                    db_path=args.db,
+                    apply=args.apply,
+                    min_cluster_size=args.min_cluster_size,
+                    prefix=args.prefix,
+                    llm_config=get_llm_config(),
+                    backup_dir=False if args.no_backup else None,
+                )
+            except RuntimeError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+
+    elif args.command == "similar":
+        from .embed import find_similar
+        try:
+            result = find_similar(db_path=args.db, track_ref=args.track_ref, top_n=args.top_n)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
     elif args.command == "import":
         if args.import_target == "mixxx":
             adapter = MixxxAdapter(mixxx_db_path=args.mixxx_db)
@@ -496,6 +556,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_bpm:             skip.add("bpm")
         if args.skip_key:             skip.add("key")
         if args.skip_energy:          skip.add("energy")
+        if args.skip_embed:           skip.add("embed")
+        if args.skip_cluster:         skip.add("cluster")
         if args.skip_cues:            skip.add("cues")
         if args.skip_genres:          skip.add("genres")
         if args.skip_clean_text:      skip.add("clean_text")

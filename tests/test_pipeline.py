@@ -36,7 +36,7 @@ def test_dry_run_returns_step_summaries(multidj_db, mixxx_db, cfg, tmp_path):
     )
     assert result["mode"] == "dry_run"
     assert "steps" in result
-    assert len(result["steps"]) == 13
+    assert len(result["steps"]) == 15
     step_names = [s["step"] for s in result["steps"]]
     assert "fix_mismatches" in step_names
     assert "clean_text" in step_names
@@ -315,8 +315,8 @@ def test_pipeline_skip_cues(multidj_db, tmp_path):
     assert cues_step["status"] == "skipped"
 
 
-def test_pipeline_cues_after_energy(multidj_db):
-    """cues step comes immediately after energy in the pipeline."""
+def test_pipeline_cues_after_cluster(multidj_db):
+    """cues step comes after cluster (embed → cluster → cues ordering)."""
     from multidj.pipeline import run_pipeline
     from unittest.mock import patch
 
@@ -328,6 +328,33 @@ def test_pipeline_cues_after_energy(multidj_db):
         )
 
     step_names = [s["step"] for s in result["steps"]]
-    energy_idx = step_names.index("energy")
+    cluster_idx = step_names.index("cluster")
     cues_idx = step_names.index("cues")
-    assert cues_idx == energy_idx + 1
+    assert cues_idx == cluster_idx + 1
+
+
+def test_pipeline_embed_cluster_steps_present(multidj_db):
+    from multidj.pipeline import run_pipeline
+    result = run_pipeline(
+        db_path=str(multidj_db),
+        apply=False,
+        skip={"import", "fix_mismatches", "parse", "dedupe", "bpm", "key", "energy",
+              "embed", "cluster", "cues", "genres", "clean_text", "crates", "sync", "report"},
+    )
+    step_names = [s["step"] for s in result["steps"]]
+    assert "embed" in step_names
+    assert "cluster" in step_names
+
+
+def test_pipeline_embed_cluster_skipped_via_config(multidj_db):
+    from multidj.pipeline import run_pipeline
+    cfg = {"pipeline": {"embed": False, "cluster": False}}
+    result = run_pipeline(
+        db_path=str(multidj_db), apply=False, cfg=cfg,
+        skip={"import", "fix_mismatches", "parse", "dedupe", "bpm",
+              "key", "energy", "cues", "genres", "clean_text", "crates", "sync", "report"},
+    )
+    embed_step = next(s for s in result["steps"] if s["step"] == "embed")
+    cluster_step = next(s for s in result["steps"] if s["step"] == "cluster")
+    assert embed_step["status"] == "skipped"
+    assert cluster_step["status"] == "skipped"
