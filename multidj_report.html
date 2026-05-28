@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MultiDJ Interactive Dashboard</title>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #121212;
+      --surface-2: #181818;
+      --ink: #f2f5f7;
+      --muted: #9ba7b3;
+      --line: #2a2d31;
+      --accent: #5fd4cc;
+      --warn: #f5c96a;
+      --bad: #ff7d7d;
+      --ok: #71df90;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(circle at top right, #171717, var(--bg) 40%);
+      color: var(--ink);
+    }
+    .wrap {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .header {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px 22px;
+      margin-bottom: 16px;
+    }
+    .header h1 { margin: 0 0 8px 0; font-size: 26px; letter-spacing: .02em; }
+    .meta { color: var(--muted); font-size: 14px; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+    .value { font-size: 28px; font-weight: 700; margin-top: 4px; color: var(--accent); }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .bar-row { display: grid; grid-template-columns: 180px 1fr 56px; gap: 8px; align-items: center; margin: 6px 0; }
+    .bar-wrap { height: 12px; background: #1f2328; border-radius: 8px; overflow: hidden; }
+    .bar { height: 100%; background: linear-gradient(90deg, #4371da, var(--accent)); }
+    .clickable { cursor: pointer; }
+    .clickable:hover { opacity: .84; }
+    .section-title { margin: 0 0 8px 2px; font-size: 18px; }
+    .small { color: var(--muted); font-size: 12px; }
+    .crate-list { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow: auto; }
+    .crate-item { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+    .crate-item.active { border-color: var(--accent); }
+    .track-row { border-bottom: 1px solid var(--line); padding: 8px 0; }
+    .track-row:last-child { border-bottom: none; }
+    button {
+      background: #222;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    .badge { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--line); }
+    .ok { color: var(--ok); border-color: #2a5e39; }
+    .warn { color: var(--warn); border-color: #5d5130; }
+    .bad { color: var(--bad); border-color: #6d3a3a; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      font-size: 14px;
+    }
+    th { background: #1a2128; }
+    tr:last-child td { border-bottom: 0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    window.__DATA__ = {"total_active_tracks": 9, "metadata_coverage": {"bpm": {"present": 9, "missing": 0, "coverage_pct": 100.0}, "genre": {"present": 7, "missing": 2, "coverage_pct": 77.78}, "key": {"present": 4, "missing": 5, "coverage_pct": 44.44}, "rating": {"present": 5, "missing": 4, "coverage_pct": 55.56}, "energy": {"present": 0, "missing": 9, "coverage_pct": 0.0}}, "missing_counts": {"bpm": 0, "genre": 2, "key": 5, "rating": 4, "energy": 9}, "top_genres": [{"genre": " House ", "count": 1}, {"genre": "Hebrew", "count": 1}, {"genre": "House", "count": 1}, {"genre": "house", "count": 1}, {"genre": "Music", "count": 1}, {"genre": "Techno", "count": 1}, {"genre": "Trance", "count": 1}], "crates": [{"id": 1, "name": "Genre: House", "type": "auto", "show": 1, "tracks": [{"id": 1, "artist": "DJ Tiesto", "title": "Red Lights", "bpm": 128.0, "key": "8B", "membership_order": 1}, {"id": 4, "artist": "DJ Tiesto", "title": "Red Lights", "bpm": 128.0, "key": "8B", "membership_order": 2}, {"id": 6, "artist": "Carl Cox", "title": "Pressure", "bpm": 136.0, "key": "9A", "membership_order": 3}], "transitions": [{"from_index": 0, "to_index": 1, "status": "compatible"}, {"from_index": 1, "to_index": 2, "status": "incompatible"}]}, {"id": 2, "name": "My Favorites", "type": "hand-curated", "show": 1, "tracks": [{"id": 1, "artist": "DJ Tiesto", "title": "Red Lights", "bpm": 128.0, "key": "8B", "membership_order": 4}, {"id": 8, "artist": "Surgeon", "title": "Force + Form", "bpm": 145.0, "key": "5A", "membership_order": 5}], "transitions": [{"from_index": 0, "to_index": 1, "status": "incompatible"}]}, {"id": 3, "name": "New Crate", "type": "catch-all", "show": 1, "tracks": [], "transitions": []}], "db_path": "/tmp/pytest-of-barc/pytest-90/test_pipeline_cues_after_clust0/library.sqlite", "generated_at": "2026-05-28T08:01:54+00:00"};
+  </script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script>
+    (() => {
+      const e = React.createElement;
+
+      function parseCamelot(key) {
+        if (!key) return null;
+        const k = String(key).trim().toUpperCase();
+        const m = k.match(/^(?:([1-9])|(1[0-2]))([AB])$/);
+        if (!m) return null;
+        return { n: Number(m[1] || m[2]), l: m[3] };
+      }
+
+      function compatibility(k1, k2) {
+        const a = parseCamelot(k1);
+        const b = parseCamelot(k2);
+        if (!a || !b) return "incompatible";
+        if (a.n === b.n && a.l === b.l) return "compatible";
+        if (a.n === b.n && a.l !== b.l) return "relative";
+        const diff = (a.n - b.n + 12) % 12;
+        if (a.l === b.l && (diff === 1 || diff === 11)) return "compatible";
+        return "incompatible";
+      }
+
+      function transitionBadge(status) {
+        if (status === "compatible") return e("span", { className: "badge ok" }, "✅ compatible");
+        if (status === "relative") return e("span", { className: "badge warn" }, "⚠️ risky");
+        return e("span", { className: "badge bad" }, "❌ incompatible");
+      }
+
+      function App() {
+        const data = window.__DATA__ || {};
+        const crates = data.crates || [];
+        const [genreFilter, setGenreFilter] = React.useState(null);
+        const [selectedCrateId, setSelectedCrateId] = React.useState(crates.length ? crates[0].id : null);
+        const [trackOverrides, setTrackOverrides] = React.useState({});
+        const [preferred, setPreferred] = React.useState({});
+        const [flagged, setFlagged] = React.useState({});
+
+        const selectedCrate = crates.find(c => c.id === selectedCrateId) || null;
+        const tracks = React.useMemo(() => {
+          if (!selectedCrate) return [];
+          return trackOverrides[selectedCrate.id] || selectedCrate.tracks || [];
+        }, [selectedCrate, trackOverrides]);
+
+        const filteredCrates = React.useMemo(() => {
+          if (!genreFilter) return crates;
+          return crates.filter(c => (c.tracks || []).some(t => String(t.title || "").toLowerCase().includes(genreFilter.toLowerCase()) || String(t.artist || "").toLowerCase().includes(genreFilter.toLowerCase())));
+        }, [crates, genreFilter]);
+
+        const moveTrack = (idx, dir) => {
+          if (!selectedCrate) return;
+          const arr = [...tracks];
+          const j = idx + dir;
+          if (j < 0 || j >= arr.length) return;
+          const tmp = arr[idx]; arr[idx] = arr[j]; arr[j] = tmp;
+          setTrackOverrides(prev => ({ ...prev, [selectedCrate.id]: arr }));
+        };
+
+        const transitions = React.useMemo(() => {
+          const out = [];
+          for (let i = 0; i < tracks.length - 1; i++) {
+            out.push({ idx: i, status: compatibility(tracks[i].key, tracks[i+1].key) });
+          }
+          return out;
+        }, [tracks]);
+
+        const active = data.total_active_tracks || 0;
+        const cov = data.metadata_coverage || {};
+        const topGenres = data.top_genres || [];
+        const missing = data.missing_counts || {};
+
+        return e("div", { className: "wrap" },
+          e("section", { className: "header" },
+            e("h1", null, "MultiDJ Interactive Dashboard"),
+            e("div", { className: "meta" }, `DB Path: ${data.db_path || ""}`),
+            e("div", { className: "meta" }, `Generated: ${data.generated_at || ""}`)
+          ),
+
+          e("section", { className: "cards" },
+            e("article", { className: "card" }, e("div", { className: "label" }, "Total Tracks"), e("div", { className: "value" }, active)),
+            ...["bpm", "genre", "key", "energy"].map(k => e("article", { className: "card", key: k },
+              e("div", { className: "label" }, `${k.toUpperCase()} Coverage`),
+              e("div", { className: "value" }, `${(cov[k]?.coverage_pct ?? 0).toFixed(1)}%`)
+            ))
+          ),
+
+          e("section", { className: "grid" },
+            e("div", { className: "panel" },
+              e("h2", { className: "section-title" }, "Genre Distribution"),
+              e("div", { className: "small" }, "Click a genre bar to filter crate list context"),
+              ...topGenres.map(g => e("div", { className: "bar-row clickable", key: g.genre, onClick: () => setGenreFilter(g.genre === genreFilter ? null : g.genre) },
+                e("div", null, g.genre),
+                e("div", { className: "bar-wrap" }, e("div", { className: "bar", style: { width: `${Math.max(4, (g.count / Math.max(1, topGenres[0]?.count || 1)) * 100)}%` } })),
+                e("div", null, g.count)
+              ))
+            ),
+
+            e("div", { className: "panel" },
+              e("h2", { className: "section-title" }, "Missing Metadata"),
+              e("table", null,
+                e("thead", null, e("tr", null, e("th", null, "Field"), e("th", null, "Missing"))),
+                e("tbody", null,
+                  ...Object.keys(missing).map(k => e("tr", { key: k }, e("td", null, k.toUpperCase()), e("td", null, missing[k])))
+                )
+              )
+            ),
+
+            e("div", { className: "panel" },
+              e("h2", { className: "section-title" }, "Crates"),
+              genreFilter ? e("div", { className: "small" }, `Filtered by: ${genreFilter}`) : null,
+              e("div", { className: "crate-list" },
+                ...filteredCrates.map(c => e("div", {
+                  key: c.id,
+                  className: `crate-item clickable ${c.id === selectedCrateId ? "active" : ""}`,
+                  onClick: () => setSelectedCrateId(c.id)
+                }, `${c.name} (${(c.tracks || []).length})`))
+              )
+            ),
+
+            e("div", { className: "panel" },
+              e("h2", { className: "section-title" }, "Crate Tracks + Harmonic Validation"),
+              !selectedCrate ? e("div", { className: "small" }, "Select a crate") : e(React.Fragment, null,
+                e("div", { className: "small" }, `Crate: ${selectedCrate.name}`),
+                ...tracks.map((t, idx) => e("div", { className: "track-row", key: `${t.id}-${idx}` },
+                  e("div", null, `${idx + 1}. ${t.artist || ""} — ${t.title || ""}`),
+                  e("div", { className: "small" }, `BPM: ${t.bpm ?? "-"} | Key: ${t.key || "-"}`),
+                  e("div", { style: { display: "flex", gap: "8px", marginTop: "6px" } },
+                    e("button", { onClick: () => moveTrack(idx, -1) }, "↑"),
+                    e("button", { onClick: () => moveTrack(idx, 1) }, "↓"),
+                    e("button", { onClick: () => setPreferred(p => ({ ...p, [`${selectedCrate.id}:${idx}`]: !p[`${selectedCrate.id}:${idx}`] })) },
+                      preferred[`${selectedCrate.id}:${idx}`] ? "★ preferred" : "☆ mark preferred"),
+                    e("button", { onClick: () => setFlagged(f => ({ ...f, [`${selectedCrate.id}:${idx}`]: !f[`${selectedCrate.id}:${idx}`] })) },
+                      flagged[`${selectedCrate.id}:${idx}`] ? "🚩 flagged" : "⚑ flag")
+                  ),
+                  idx < transitions.length ? e("div", { style: { marginTop: "6px" } }, transitionBadge(transitions[idx].status)) : null
+                ))
+              )
+            )
+          )
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(e(App));
+    })();
+  </script>
+</body>
+</html>
