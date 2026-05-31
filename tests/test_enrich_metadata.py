@@ -299,3 +299,79 @@ def test_write_file_tags_noop_on_empty_fields():
     with patch("mutagen.File", return_value=mock_file):
         _write_file_tags("/fake/track.mp3", {})
     mock_file.save.assert_not_called()
+
+
+def _make_track_row(track_id=1, artist="Carl Cox", title="Pressure",
+                    genre=None, album=None, release_year=None, label=None,
+                    filepath="/music/Carl_Cox_-_Pressure.mp3"):
+    row = MagicMock()
+    row.__getitem__ = lambda self, k: {
+        "id": track_id, "artist": artist, "title": title,
+        "genre": genre, "album": album,
+        "release_year": release_year, "label": label,
+        "path": filepath,
+    }[k]
+    return row
+
+
+def test_enrich_track_applies_file_tag_year(multidj_db):
+    from multidj.enrich import enrich_track
+    track = _make_track_row(release_year=None)
+
+    with patch("multidj.enrich.read_file_tags", return_value={"release_year": 2001}), \
+         patch("multidj.enrich.search_discogs", return_value=None), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        changeset = enrich_track(track, discogs_client=None, mb_user_agent="ua",
+                                 write_tags=False)
+
+    assert changeset["changes"].get("release_year") == 2001
+    assert changeset["source"] == "file_tags"
+
+
+def test_enrich_track_does_not_overwrite_existing_value(multidj_db):
+    from multidj.enrich import enrich_track
+    track = _make_track_row(release_year=1999)  # already has year
+
+    with patch("multidj.enrich.read_file_tags", return_value={"release_year": 2001}), \
+         patch("multidj.enrich.search_discogs", return_value=None), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        changeset = enrich_track(track, discogs_client=None, mb_user_agent="ua",
+                                 write_tags=False)
+
+    assert "release_year" not in changeset["changes"]
+
+
+def test_enrich_track_force_overwrites_existing(multidj_db):
+    from multidj.enrich import enrich_track
+    track = _make_track_row(release_year=1999)
+
+    with patch("multidj.enrich.read_file_tags", return_value={"release_year": 2001}), \
+         patch("multidj.enrich.search_discogs", return_value=None), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        changeset = enrich_track(track, discogs_client=None, mb_user_agent="ua",
+                                 write_tags=False, force=True)
+
+    assert changeset["changes"].get("release_year") == 2001
+
+
+def test_enrich_track_prefers_discogs_styles_over_musicbrainz(multidj_db):
+    from multidj.enrich import enrich_track
+    track = _make_track_row(genre=None)
+
+    discogs_data = {
+        "styles": ["Techno", "Minimal Techno"],
+        "release_year": 2003,
+        "label": "Tresor",
+        "catalog_number": None,
+        "score": 0.95,
+        "source": "discogs",
+    }
+    with patch("multidj.enrich.read_file_tags", return_value={}), \
+         patch("multidj.enrich.search_discogs", return_value=discogs_data), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        changeset = enrich_track(track, discogs_client=MagicMock(), mb_user_agent="ua",
+                                 write_tags=False)
+
+    assert changeset["changes"].get("genre") == "Techno"
+    assert changeset["styles"] == ["Techno", "Minimal Techno"]
+    assert changeset["source"] == "discogs"

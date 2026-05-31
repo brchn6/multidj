@@ -306,3 +306,96 @@ def _write_file_tags(filepath: str, fields: dict[str, Any]) -> None:
                 pass
 
     f.save()
+
+
+def enrich_track(
+    track: Any,
+    *,
+    discogs_client: Any | None,
+    mb_user_agent: str,
+    write_tags: bool = False,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Orchestrate three-layer enrichment for one track. Returns changeset dict.
+
+    `write_tags=True` calls _write_file_tags() on the audio file after computing
+    the changeset. DB writes are the caller's responsibility.
+    """
+    track_id = track["id"]
+    artist = track["artist"] or ""
+    title = track["title"] or ""
+    filepath = track["path"]
+
+    # Fields present in the DB row that we may fill in
+    db_fields = {
+        "release_year": track["release_year"],
+        "label": track["label"],
+        "album": track["album"],
+        "genre": track["genre"],
+    }
+
+    changes: dict[str, Any] = {}  # field -> new_value
+    styles: list[str] = []
+    source: str | None = None
+    score: float | None = None
+
+    def _accept(field: str, value: Any) -> bool:
+        """Accept a value if the field is empty (or force is set)."""
+        if value is None:
+            return False
+        if not force and db_fields.get(field) is not None:
+            return False
+        return True
+
+    # Layer 1: file tags
+    file_data = read_file_tags(filepath)
+    for field in ("release_year", "label", "album", "genre"):
+        if _accept(field, file_data.get(field)):
+            changes[field] = file_data[field]
+            if source is None:
+                source = "file_tags"
+
+    # Layer 2: Discogs
+    if discogs_client is not None and artist and title:
+        discogs_data = search_discogs(artist, title, discogs_client)
+        if discogs_data:
+            for field in ("release_year", "label"):
+                if _accept(field, discogs_data.get(field)):
+                    changes[field] = discogs_data[field]
+            if _accept("genre", discogs_data.get("styles", [None])[0] if discogs_data.get("styles") else None):
+                changes["genre"] = discogs_data["styles"][0]
+            styles = discogs_data.get("styles", [])
+            source = "discogs"
+            score = discogs_data.get("score")
+
+    # Layer 3: MusicBrainz (only if still missing fields)
+    needs_mb = any(
+        (force or db_fields.get(f) is None) and f not in changes
+        for f in ("release_year", "label", "album", "genre")
+    )
+    if needs_mb and artist and title:
+        mb_data = search_musicbrainz(artist, title, mb_user_agent)
+        if mb_data:
+            for field in ("release_year", "label", "album", "genre"):
+                if _accept(field, mb_data.get(field)) and field not in changes:
+                    changes[field] = mb_data[field]
+            if source is None:
+                source = "musicbrainz"
+                score = mb_data.get("score")
+
+    if write_tags and changes:
+        try:
+            _write_file_tags(filepath, changes)
+        except Exception:
+            pass  # file write errors are non-fatal
+
+    return {
+        "track_id": track_id,
+        "artist": artist,
+        "title": title,
+        "changes": changes,
+        "styles": styles,
+        "source": source,
+        "score": score,
+        "error": None,
+    }
