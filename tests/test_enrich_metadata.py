@@ -375,3 +375,82 @@ def test_enrich_track_prefers_discogs_styles_over_musicbrainz(multidj_db):
     assert changeset["changes"].get("genre") == "Techno"
     assert changeset["styles"] == ["Techno", "Minimal Techno"]
     assert changeset["source"] == "discogs"
+
+
+def test_enrich_metadata_dry_run(multidj_db):
+    from multidj.enrich import enrich_metadata
+    with patch("multidj.enrich.read_file_tags", return_value={"release_year": 2001}), \
+         patch("multidj.enrich.search_discogs", return_value=None), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        result = enrich_metadata(str(multidj_db), apply=False)
+
+    assert result["mode"] == "dry_run"
+    assert result["total_candidates"] >= 1
+    assert result["applied"] == 0
+
+
+def test_enrich_metadata_apply_writes_release_year(multidj_db):
+    from multidj.enrich import enrich_metadata
+    with patch("multidj.enrich.read_file_tags", return_value={"release_year": 2001}), \
+         patch("multidj.enrich.search_discogs", return_value=None), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        result = enrich_metadata(str(multidj_db), apply=True)
+
+    assert result["applied"] >= 1
+    conn = sqlite3.connect(str(multidj_db))
+    count = conn.execute(
+        "SELECT COUNT(*) FROM tracks WHERE release_year = 2001 AND deleted = 0"
+    ).fetchone()[0]
+    conn.close()
+    assert count >= 1
+
+
+def test_enrich_metadata_apply_writes_discogs_styles(multidj_db):
+    from multidj.enrich import enrich_metadata
+    discogs_data = {
+        "styles": ["Techno", "Minimal Techno"],
+        "release_year": 2003,
+        "label": "Tresor",
+        "catalog_number": "TRS 001",
+        "score": 0.95,
+        "source": "discogs",
+    }
+    with patch("multidj.enrich.read_file_tags", return_value={}), \
+         patch("multidj.enrich.search_discogs", return_value=discogs_data), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        result = enrich_metadata(str(multidj_db), apply=True,
+                                 enrich_cfg={"discogs": {"token": "tok", "user_agent": "u"},
+                                             "musicbrainz": {"user_agent": "ua"}})
+
+    conn = sqlite3.connect(str(multidj_db))
+    row = conn.execute(
+        "SELECT value FROM track_tags WHERE key='discogs_styles' LIMIT 1"
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert "Techno" in row[0]
+
+
+def test_enrich_metadata_limit(multidj_db):
+    from multidj.enrich import enrich_metadata
+    with patch("multidj.enrich.read_file_tags", return_value={"release_year": 2001}), \
+         patch("multidj.enrich.search_discogs", return_value=None), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        result = enrich_metadata(str(multidj_db), apply=False, limit=2)
+
+    assert result["processed"] == 2
+
+
+def test_enrich_metadata_error_isolation(multidj_db):
+    from multidj.enrich import enrich_metadata
+
+    def _bad_tags(path):
+        raise RuntimeError("audio read failure")
+
+    with patch("multidj.enrich.read_file_tags", side_effect=_bad_tags), \
+         patch("multidj.enrich.search_discogs", return_value=None), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        result = enrich_metadata(str(multidj_db), apply=True)
+
+    assert result["errors"] >= 1
+    assert result["applied"] == 0

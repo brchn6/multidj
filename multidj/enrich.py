@@ -400,3 +400,150 @@ def enrich_track(
         "score": score,
         "error": None,
     }
+
+
+def enrich_metadata(
+    db_path: str | None = None,
+    *,
+    apply: bool = False,
+    write_tags: bool = False,
+    force: bool = False,
+    limit: int | None = None,
+    enrich_cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Three-layer metadata enrichment for all active tracks.
+
+    Layers: file tags → Discogs → MusicBrainz. Only fills empty fields
+    (unless force=True). Writes to DB on apply; optionally writes file tags.
+    """
+    from .backup import create_backup
+
+    if enrich_cfg is None:
+        from .config import get_enrich_config
+        enrich_cfg = get_enrich_config()
+
+    with connect(db_path, readonly=True) as _guard:
+        ensure_not_empty(_guard)
+
+    where = "1=1" if force else (
+        "release_year IS NULL OR label IS NULL OR album IS NULL OR genre IS NULL"
+    )
+    sql = f"""
+        SELECT id, artist, title, path, genre, album, release_year, label
+        FROM tracks
+        WHERE ({where}) AND deleted = 0
+        ORDER BY artist, title
+    """
+    if limit is not None:
+        sql += f" LIMIT {int(limit)}"
+
+    count_sql = f"SELECT COUNT(*) FROM tracks WHERE ({where}) AND deleted = 0"
+
+    with connect(db_path, readonly=True) as conn:
+        rows = conn.execute(sql).fetchall()
+        total_candidates = conn.execute(count_sql).fetchone()[0]
+
+    mode = "apply" if apply else "dry_run"
+
+    if not apply:
+        _progress(f"Dry-run: {total_candidates:,} tracks would be enriched")
+        return {
+            "mode": mode,
+            "total_candidates": total_candidates,
+            "processed": min(len(rows), limit or len(rows)),
+            "applied": 0,
+            "errors": 0,
+            "error_details": [],
+            "changesets": [],
+        }
+
+    # Build Discogs client if configured
+    discogs_client_obj: Any = None
+    discogs_cfg = enrich_cfg.get("discogs")
+    if discogs_cfg:
+        try:
+            import discogs_client as _dc
+            discogs_client_obj = _dc.Client(
+                discogs_cfg.get("user_agent", "multidj/1.0"),
+                user_token=discogs_cfg["token"],
+            )
+        except ImportError:
+            _progress("[enrich] discogs_client not installed; skipping Discogs layer")
+
+    mb_user_agent = enrich_cfg.get("musicbrainz", {}).get(
+        "user_agent", "multidj/1.0 (bar.cohen@weizmann.ac.il)"
+    )
+
+    changesets: list[dict[str, Any]] = []
+    error_details: list[dict] = []
+    applied_count = 0
+    total = len(rows)
+
+    _progress(f"Enriching {total:,} tracks...")
+
+    for i, row in enumerate(rows, 1):
+        label = f"{row['artist'] or ''} - {row['title'] or ''}".strip(" -") or row["path"]
+        _progress(f"[{i:{len(str(total))}}/{total}] {label[:60]}", end="")
+        try:
+            cs = enrich_track(
+                row,
+                discogs_client=discogs_client_obj,
+                mb_user_agent=mb_user_agent,
+                write_tags=write_tags,
+                force=force,
+            )
+            changesets.append(cs)
+
+            if not cs["changes"] and not cs["styles"]:
+                _progress("  —")
+                continue
+
+            with connect(db_path, readonly=False) as conn:
+                if cs["changes"]:
+                    set_parts = ", ".join(f"{k} = ?" for k in cs["changes"])
+                    vals = list(cs["changes"].values()) + [row["id"]]
+                    conn.execute(
+                        f"UPDATE tracks SET {set_parts} WHERE id = ?", vals
+                    )
+
+                # Write track_tags (styles, enrichment audit)
+                tag_rows: list[tuple] = []
+                if cs["styles"]:
+                    tag_rows.append((row["id"], "discogs_styles",
+                                     ", ".join(cs["styles"])))
+                    tag_rows.append((row["id"], "discogs_primary_style",
+                                     cs["styles"][0]))
+                if cs["source"]:
+                    tag_rows.append((row["id"], "enrichment_source", cs["source"]))
+                if cs["score"] is not None:
+                    tag_rows.append((row["id"], "enrichment_score",
+                                     f"{cs['score']:.3f}"))
+
+                conn.executemany(
+                    "INSERT OR REPLACE INTO track_tags (track_id, key, value) VALUES (?,?,?)",
+                    tag_rows,
+                )
+                conn.commit()
+
+            applied_count += 1
+            _progress("  ✓")
+
+        except Exception as exc:
+            cs_err = {
+                "track_id": row["id"],
+                "artist": row["artist"],
+                "title": row["title"],
+                "error": str(exc),
+            }
+            error_details.append(cs_err)
+            _progress(f"  ✗ {exc}")
+
+    return {
+        "mode": mode,
+        "total_candidates": total_candidates,
+        "processed": total,
+        "applied": applied_count,
+        "errors": len(error_details),
+        "error_details": error_details,
+        "changesets": changesets,
+    }
