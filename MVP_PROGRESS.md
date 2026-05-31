@@ -1,9 +1,9 @@
 # MVP Progress — multidj
 
-**Stack:** Python 3.9+, SQLite (stdlib only for core), librosa + mutagen (optional, key analysis)
+**Stack:** Python 3.9+, SQLite (stdlib only for core), librosa + mutagen (analysis), torch + allin1 (cue detection), CLAP + UMAP + HDBSCAN (embeddings/clustering)
 **Entry point:** `multidj` (primary), `mixxx-tool` (legacy alias)
 **DB default:** `~/.multidj/library.sqlite`
-**Last verified:** 2026-04-22
+**Last verified:** 2026-05-28
 
 ---
 
@@ -11,91 +11,90 @@
 
 ### Infrastructure
 - [x] Package structure (`pyproject.toml`, `__init__.py`, `__main__.py`)
-- [x] `db.py` — `connect()` (read-only URI + read-write), `resolve_db_path()`, `ensure_not_empty()`, migration runner (`_apply_migrations()`)
+- [x] `db.py` — `connect()` (read-only URI + read-write), `resolve_db_path()`, `ensure_not_empty()`, migration runner
 - [x] `backup.py` — timestamped `.sqlite` copies to `~/.multidj/backups/` before every write
-- [x] `models.py` — `LibrarySummary` dataclass with `to_dict()`
+- [x] `models.py` — `LibrarySummary` dataclass
 - [x] `utils.py` — `emit()` for JSON / human-readable output
-- [x] `constants.py` — `UNINFORMATIVE_GENRES`, `EMOJI_OR_SYMBOL_RE`, `AUTO_CRATE_PREFIXES`, `CATCH_ALL_CRATE_NAMES`, `CAMELOT_SUFFIX_RE`, `NOISE_PREFIX_RE`, `DUPLICATE_SUFFIX_RE`, `REBUILD_CRATE_RE`, `CAMELOT_KEY_MAP`, `KNOWN_ADAPTERS`
-- [x] `config.py` — `load_config()`, `save_config()`, `get_music_dir()`; `~/.multidj/config.toml`; defaults written on first run; unknown sections preserved
+- [x] `constants.py` — genres, crate prefixes, regex patterns, `CAMELOT_KEY_MAP`, `KNOWN_ADAPTERS`
+- [x] `config.py` — `load_config()`, `save_config()`, `get_music_dir()`, `get_llm_config()`; `~/.multidj/config.toml`
 - [x] `cli.py` — argparse with global `--json` / `--db` flag hoisting; all subcommands wired
 - [x] `adapters/base.py` — `SyncAdapter` ABC (`import_all`, `push_track`, `full_sync`)
-- [x] `adapters/mixxx.py` — `MixxxAdapter` with full import + sync + crate sync implementation
-- [x] `adapters/directory.py` — `DirectoryAdapter`: import tracks from raw filesystem paths
-- [x] `pipeline.py` — `run_pipeline()`: chains all 8 steps, one backup at start, step isolation, `--skip-*` flags
-- [x] `migrations/001_initial.sql` — MultiDJ schema v1 (`tracks`, `track_tags`, `crates`, `crate_tracks`, `sync_state`, `schema_version`)
+- [x] `adapters/mixxx.py` — `MixxxAdapter`: import + sync + crate sync + hot cue sync
+- [x] `adapters/directory.py` — `DirectoryAdapter`: import tracks from filesystem paths
+- [x] `pipeline.py` — `run_pipeline()`: chains all 13 steps, one backup at start, step isolation, `--skip-*` flags
+- [x] Migrations: `001_initial.sql`, `002_cue_points.sql`, `003_crates_add_type.sql`, `004_cue_points_add_confidence_source.sql`, `005_embeddings.sql`
 
 ### Commands
-- [x] `import mixxx` — one-time pull from `~/.mixxx/mixxxdb.sqlite`; dry-run + apply; `timesplayed→play_count`; key lookup via Mixxx `keys` table; sets `sync_state.dirty=0` for all imported tracks
-- [x] `sync mixxx` — push dirty tracks back to Mixxx; dry-run + apply; backs up Mixxx DB first; marks `dirty=0` on success
-- [x] `scan` — active track counts (genre, BPM, key, rating), crate count, optional table list
+- [x] `import mixxx` — one-time pull from `~/.mixxx/mixxxdb.sqlite`; dry-run + apply
+- [x] `import directory PATH` — scan a directory for audio files and import; `--apply`, `--no-backup`
+- [x] `sync mixxx` — push dirty tracks + crates + hot cues back to Mixxx; dry-run + apply
+- [x] `scan` — active track counts (genre, BPM, key, rating), crate count
 - [x] `backup` — manual backup with optional `--backup-dir`
-- [x] `audit genres` — genre distribution, case collisions, emoji/uninformative detection (`--top N`)
+- [x] `audit genres` — genre distribution, case collisions, emoji/uninformative detection
 - [x] `audit metadata` — field coverage percentages across active tracks
-- [x] `clean genres` — dry-run/apply: case normalization, uninformative → NULL, whitespace (`--limit`, `--no-backup`)
-- [x] `clean text` — dry-run/apply: whitespace strip/collapse + mapped trailing garbage cleanup in title/artist
-- [x] `import directory` — scan a directory for audio files and import into MultiDJ DB; `--apply`, `--no-backup`
-- [x] `analyze bpm` — librosa beat tracking sampled across start/middle/end windows; reports variable-BPM tracks; `--apply`, `--force`, `--limit`, `--no-backup`; per-track error isolation
-- [x] `analyze key` — Krumhansl-Schmuckler key detection via librosa/chroma; `--apply`, `--write-tags`, `--no-sync-db`, `--force`, `--limit`
-- [x] `analyze energy` — librosa RMS × spectral centroid, min-max normalized 0–1; `--apply`, `--force`, `--limit`, `--no-backup`
-- [x] `pipeline` — chains import→parse→bpm→key→energy→clean genres→crates rebuild→sync; `--apply`, `--skip-*` per step, `--music-dir`
-- [x] `crates audit` — three-tier classification (catch-all / auto / hand-curated), threshold report, `--summary`, `--min-tracks`
-- [x] `crates hide` — set `show=0` on small auto crates (reversible), `--include-hand-curated`, `--apply`
-- [x] `crates show` — restore hidden crates, optional `--min-tracks` threshold
-- [x] `crates delete` — permanent delete of auto crates + their track assignments, `--apply`
-- [x] `crates rebuild` — delete all auto-crates, recreate from current DB; config-driven dimensions: Genre:/Lang:/BPM:/Key:/Energy:; `--min-tracks`, `--apply`
-- [x] `dedupe` — artist+title and filesize+duration matching; keeper = most-played → highest-rated → largest; `--by`, `--apply`
-- [x] `triage` — mpv-based keyboard audition: KP0=soft-delete, Shift+KP0=hard-delete (rm file), KP1–5=rating, n=skip; `--crate`, `--limit`; `triage tag --hard-delete` write subcommand called by Lua
-- [x] `parse` — extract artist/title/remixer/featuring from filenames; confidence tiers (high/medium/low); `--apply`, `--force`, `--min-confidence`, `--limit`
-- [x] `enrich language` — detect Hebrew tracks by Unicode range (U+0590–U+05FF, U+FB1D–U+FB4F); read-only report
+- [x] `audit mismatches` — detect artist/title swap mismatches vs filenames
+- [x] `clean genres` — case normalization, uninformative → NULL, whitespace; `--apply`, `--limit`
+- [x] `clean text` — whitespace strip/collapse + trailing garbage cleanup in title/artist/album; `--apply`
+- [x] `parse` — extract artist/title/remixer from filenames; confidence tiers; `--apply`, `--force`, `--min-confidence`, `--limit`
+- [x] `enrich language` — detect Hebrew tracks by Unicode range; read-only report
+- [x] `analyze bpm` — librosa beat tracking (start/mid/end windows); reports variable-BPM; `--apply`, `--force`, `--limit`
+- [x] `analyze key` — Krumhansl-Schmuckler key detection via librosa/chroma; `--apply`, `--write-tags`, `--force`, `--limit`
+- [x] `analyze energy` — librosa RMS × spectral centroid, normalized 0–1; `--apply`, `--force`, `--limit`
+- [x] `analyze embed` — CLAP 512-dim audio embeddings (3-window sampling, mean-pooled); `--apply`, `--force`, `--limit`
+- [x] `analyze cues` — structural segmentation via allin1 (neural) + librosa cross-validation; detects intro/verse/chorus/drop/outro; high-confidence cues synced to Mixxx; `--apply`, `--force`, `--limit`
+- [x] `cluster vibe` — UMAP (512d→10d) + HDBSCAN → `Vibe/` crates; LLM naming via OpenAI-compatible API; `--apply`
+- [x] `similar <track>` — KNN cosine distance in embedding space; `--top N`
+- [x] `cues clear` — remove all auto-detected cues and reset `intro_end`/`outro_start`; `--apply`
+- [x] `crates audit` — three-tier classification (catch-all / auto / hand-curated), threshold report
+- [x] `crates hide/show/delete` — bulk crate management; `--apply`, `--min-tracks`
+- [x] `crates rebuild` — delete all auto-crates, recreate from DB; config-driven: Genre:/Lang:/BPM:/Key:/Energy:/Vibe:; `--apply`
+- [x] `dedupe` — artist+title and filesize+duration matching; `--apply`, `--by`
+- [x] `triage` — mpv-based keyboard audition: KP0=soft-delete, Shift+KP0=hard-delete (rm file), KP1–5=rating, n=skip, ←/→=±30s; `--crate`, `--limit`
+- [x] `report dashboard` — standalone interactive HTML dashboard; `--output`
+- [x] `pipeline` — chains all 13 steps: import→fix_mismatches→parse→dedupe→bpm→key→energy→cues→embed→cluster→genres→clean_text→crates→sync→report; `--apply`, `--skip-<step>`, `--music-dir`, `--limit`
+- [x] `config set-db / set-music-dir / show` — persistent config management
 
-### Test Suite
-- [x] `tests/fixtures/data.py` — 10-track canonical fixture (9 active + 1 deleted) covering duplicates, Hebrew, case collisions, whitespace genres, uninformative genres, missing metadata
-- [x] `tests/fixtures/mixxx_factory.py` — builds Mixxx-schema SQLite from fixture data
-- [x] `tests/fixtures/multidj_factory.py` — builds MultiDJ-schema SQLite in post-import state
-- [x] `tests/conftest.py` — `mixxx_db`, `multidj_db`, `multidj_db_conn` pytest fixtures
-- [x] `tests/test_safety.py` — cross-cutting invariants: dry-run never writes, apply writes, backup created
-- [x] `tests/test_import.py` — 12 tests (count, field mapping, play_count, sync_state, idempotency, key lookup)
-- [x] `tests/test_import_directory.py` — directory adapter import tests
-- [x] `tests/test_sync.py` — 6 tests (dry-run, apply pushes data, marks clean, skips clean, dirty trigger)
-- [x] `tests/test_scan.py`, `test_audit.py`, `test_enrich.py`, `test_parse.py`, `test_clean.py`, `test_crates.py`, `test_dedupe.py`, `test_analyze.py`
-- [x] `tests/test_analyze_energy.py` — 6 tests (storage, --force, per-track error isolation, normalization)
-- [x] `tests/test_config.py` — 7 tests (defaults created, load/save, toggles, unknown section preservation)
-- [x] `tests/test_mixxx_crate_sync.py` — 4 tests (crates pushed, stale deletion, membership reconciliation)
-- [x] `tests/test_pipeline.py` — 5 tests (dry-run, apply, --skip-*, single backup, step isolation)
-- [x] `tests/test_embed.py` — 11 tests (storage, dry-run, force, incremental, find_similar, error isolation)
-- [x] `tests/test_cluster.py` — 10 tests (cluster_embeddings, cluster_vibe, LLM naming, noise tracks, crate writing)
-- [x] `tests/test_llm_config.py` — 5 tests (get_llm_config: missing, partial, full, model default, config isolation)
-- [x] **232 tests passing** (7 pre-existing failures in `test_analyze_cues.py` — Phase 9 not yet implemented)
+### Phase 13 — Automatic Cue Detection (2026-05-28)
+- [x] `multidj/migrations/004_cue_points_add_confidence_source.sql` — adds `confidence` ('high'/'low') + `source` ('auto'/'manual') to `cue_points`
+- [x] `multidj/cues.py` — `detect_cues()`, `analyze_cues()`, `clear_cues()`
+  - **allin1** (primary): transformer model → labeled segments + bar grid (downbeats)
+  - **librosa** (secondary): RMS energy + spectral flux + chroma novelty → transition timestamps
+  - Cross-validation: both agree within ±1 bar → `confidence='high'`; allin1 only → `confidence='low'`
+  - Bar-snapping: all positions snapped to nearest allin1 downbeat
+  - Derived `drop` cue from first `chorus`/`instrumental` segment
+  - `source='auto'` on all machine cues; `source='manual'` never overwritten
+- [x] Mixxx hot cue sync: intro=slot 0 (blue), drop=slot 1 (red), outro=slot 2 (green); high-confidence only; slots 0/1/2 wiped and repopulated each sync
+- [x] Escape hatch: `multidj cues clear --apply` wipes all auto cues + NULLs `intro_end`/`outro_start`
+- [x] Pipeline step 8 (after energy, before embed); `--skip-cues` flag; requires `uv sync --extra embeddings`
+
+### Phase 16 — Triage Player (2026-05-28)
+- [x] `multidj/triage.py` — `build_triage_queue()`, `write_m3u()`, `launch_session()`, `tag_track()`
+- [x] `multidj/assets/triage.lua` — mpv Lua script: KP0=soft-delete, Shift+KP0=hard-delete, KP1–5=rating, n=skip, ←/→=±30s seek; calls `multidj triage tag` on each decision
+- [x] `multidj triage [--crate NAME] [--limit N]` — launches mpv with M3U playlist
+- [x] `multidj triage tag` — internal write subcommand called by Lua script
 
 ### Phase 12 — Semantic Embeddings + Clustering (2026-05-27)
-- [x] `multidj/migrations/004_embeddings.sql` — `embeddings` table: `(track_id PK, model_name, vector BLOB, created_at)`
+- [x] `multidj/migrations/005_embeddings.sql` — `embeddings` table: `(track_id PK, model_name, vector BLOB, created_at)`
 - [x] `multidj/embed.py` — `analyze_embed()`, `find_similar()`, `load_clap_model()`, `store_embedding()`, `load_embeddings_from_db()`
   - Model: `laion/larger_clap_music` (512-dim float32 vectors)
-  - 3-window sampling: start / mid / end × 30 s, mean-pooled
-  - Incremental: skips already-embedded tracks; `--force` to redo all
-  - Per-track error isolation — one bad file never kills the batch
-  - Requires `uv sync --extra embeddings` (torch, transformers, librosa, umap-learn, hdbscan, openai)
+  - 3-window sampling: start / mid / end × 30s, mean-pooled
 - [x] `multidj/cluster.py` — `cluster_embeddings()`, `cluster_vibe()`, `name_cluster()`
-  - UMAP: 512d → 10d (cosine metric, `random_state=42`, PCA init for stability with small N)
-  - HDBSCAN: automatic cluster count, noise → `Vibe/Unclassified`
-  - LLM naming: OpenAI-compatible API via `[llm]` config; fallback to `Vibe/Cluster-NN`
-  - Clear-and-rebuild lifecycle for `Vibe/` crates
-- [x] `multidj analyze embed --apply [--force] [--limit N]`
-- [x] `multidj cluster vibe --apply [--min-cluster-size N]`
-- [x] `multidj similar <track> [--top N]` — KNN cosine distance, pure numpy, read-only
-- [x] Pipeline steps 8 (embed) + 9 (cluster) added; `--skip-embed`, `--skip-cluster` flags
-- [x] `get_llm_config()` in `config.py` — reads `[llm].base_url/api_key/model`
-- [x] `Vibe/` added to `AUTO_CRATE_PREFIXES` + `REBUILD_CRATE_RE` in `constants.py`
-- [x] **PoC verified (2026-05-27):** 35 tracks encoded at 512-dim on CPU (~2 min/track), 3 UMAP/HDBSCAN clusters found, 4 `Vibe/` crates written, `multidj similar` returning ranked cosine-distance results
+  - UMAP: 512d→10d (cosine metric); HDBSCAN: automatic cluster count; noise → `Vibe/Unclassified`
+  - LLM naming via `[llm]` config; fallback to `Vibe/Cluster-NN`
+- [x] PoC verified (2026-05-27): 35 tracks encoded, 3 clusters found, 4 `Vibe/` crates written
+
+### Test Suite
+- [x] 271 tests passing (0 failures)
+- [x] Fixture: 10-track canonical dataset covering duplicates, Hebrew, case collisions, missing metadata
+- [x] Tests: `test_import`, `test_import_directory`, `test_sync`, `test_scan`, `test_audit`, `test_enrich`, `test_parse`, `test_clean`, `test_crates`, `test_dedupe`, `test_analyze`, `test_analyze_energy`, `test_config`, `test_mixxx_crate_sync`, `test_pipeline`, `test_embed`, `test_cluster`, `test_llm_config`, `test_triage`, `test_analyze_cues`, `test_mixxx_cue_sync`, `test_migrations`, `test_report`, `test_session_changes`
 
 ### Safety Model
 - [x] All commands dry-run by default; nothing written without `--apply`
 - [x] Auto backup before every write (skip with `--no-backup`)
-- [x] `dedupe --apply` and `crates delete --apply` use soft-delete (`deleted=1`) — recoverable
-- [x] Per-track error isolation in all analyze commands — one bad file does not abort the batch
-- [x] All stats exclude soft-deleted tracks (`deleted = 0` filter everywhere)
-- [x] Wrong-DB guard in every command: clear error if pointed at a Mixxx DB instead of MultiDJ DB
-- [x] `sync mixxx --apply` backs up Mixxx DB before writing
+- [x] Soft-delete (`deleted=1`) everywhere — all destructive operations are recoverable
+- [x] Per-track error isolation in all analyze commands
+- [x] `deleted = 0` filter applied in all stats and operations
+- [x] Wrong-DB guard: clear error if pointed at Mixxx DB instead of MultiDJ DB
 
 ---
 
@@ -104,57 +103,41 @@
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 0 | Package rename `mixxx_tool` → `multidj` | **Done** |
-| 1 | New DB layer: `~/.multidj/library.sqlite`, migration runner, schema v1 | **Done** |
-| 2 | `import mixxx` — one-time pull from Mixxx into MultiDJ DB | **Done** |
-| 3 | Port all commands to MultiDJ schema (`tracks` table, `deleted` column) | **Done** |
+| 1 | DB layer, migration runner, schema v1 | **Done** |
+| 2 | `import mixxx` — one-time pull from Mixxx | **Done** |
+| 3 | Port all commands to MultiDJ schema | **Done** |
 | 4 | `sync mixxx` — push dirty tracks back to Mixxx | **Done** |
-| 5 | Remove `mixxx-tool` alias once transition confirmed | Deferred |
-| 6 | **Standalone ingestion** — `import directory`, `analyze bpm/energy`, config-driven crates | **Done** |
-| 7 | **Mixxx crate sync** — push crates + track assignments back to Mixxx | **Done** |
-| 8 | **Fingerprint enrichment** — pyacoustid → AcoustID → artist/title/genre for unknowns | Planned |
-| 9 | **Cue point detection** — librosa energy analysis → intro/drop/outro markers in DB | Planned |
-| 10 | **Mixxx cue sync** — write cue points to Mixxx `cues` table | Planned |
-| 11 | **MCP server** — expose all commands as agent-callable tools | Planned |
-| 12 | **Semantic embeddings** — CLAP encoder → SQLite BLOB storage → UMAP+HDBSCAN → `Vibe/` crates | **Done** |
-| 12b | **Similarity queries** — `multidj similar <track>` KNN search in embedding space | **Done** |
-| 13 | **Playlist builder** — constraint-based sequencing (mood + BPM arc + Camelot harmonic flow) | Planned |
-| 14 | **MCP embedding/playlist tools** — expose similarity + playlist building as agent tools | Planned |
-| 15 | **Natural language DJ** — "build me a 2am dark techno set" via LLM → playlist | Vision |
-| 16 | **Triage player** — `multidj triage` mpv + Lua keyboard-driven track audition; KP0=soft-delete, Shift+KP0=hard-delete, KP1–5=rating | **Done** |
+| 5 | Remove `mixxx-tool` alias | Deferred |
+| 6 | Standalone ingestion — `import directory`, `analyze bpm/energy`, config-driven crates | **Done** |
+| 7 | Mixxx crate sync | **Done** |
+| 8 | Fingerprint enrichment — pyacoustid → AcoustID for unknown tracks | Planned |
+| 9 | Cue point detection | **Done** (as Phase 13) |
+| 10 | Mixxx cue sync | **Done** (as Phase 13) |
+| 11 | MCP server — expose commands as agent-callable tools | Planned |
+| 12 | Semantic embeddings — CLAP → UMAP+HDBSCAN → `Vibe/` crates | **Done** |
+| 12b | Similarity queries — `multidj similar` KNN search | **Done** |
+| 13 | Automatic cue detection — allin1 + librosa → intro/drop/outro → Mixxx hot cues | **Done** |
+| 14 | MCP embedding/playlist tools | Planned |
+| 15 | Natural language DJ — LLM → playlist | Vision |
+| 16 | Triage player — `multidj triage` mpv + Lua keyboard-driven audition | **Done** |
 
 ---
 
 ## BPM Range Definitions
 
-These are the canonical BPM ranges used for auto-crate generation:
-
-| Crate Name | BPM Range | Genres |
-|---|---|---|
-| `BPM:<90` | 0 – 89 | Downtempo / Hip-Hop / Chill |
-| `BPM:90-105` | 90 – 104 | Dancehall / Reggae / Afro |
-| `BPM:105-115` | 105 – 114 | Midtempo / Indie Dance / Nu Disco |
-| `BPM:115-125` | 115 – 124 | House / Deep House / Disco House |
-| `BPM:125-130` | 125 – 129 | Tech House / Progressive |
-| `BPM:128-135` | 128 – 134 | Techno (low–mid energy) |
-| `BPM:135-160` | 135 – 159 | Techno (peak) / Hard Dance / Trance |
-| `BPM:160-175` | 160 – 174 | Drum & Bass / Jungle |
-| `BPM:175+` | 175+ | Hardcore / Gabber |
+| Crate Name | BPM Range |
+|---|---|
+| `BPM:<90` | 0 – 89 |
+| `BPM:90-105` | 90 – 104 |
+| `BPM:105-115` | 105 – 114 |
+| `BPM:115-125` | 115 – 124 |
+| `BPM:125-130` | 125 – 129 |
+| `BPM:128-135` | 128 – 134 |
+| `BPM:135-160` | 135 – 159 |
+| `BPM:160-175` | 160 – 174 |
+| `BPM:175+` | 175+ |
 
 Note: 125–130 and 128–135 intentionally overlap — tracks at 128–130 BPM appear in both Tech House and Techno crates.
-
----
-
-## Current Library Snapshot (2026-04-06)
-
-| Metric | Value |
-|--------|-------|
-| Active tracks | 1,835 |
-| Tracks with BPM | 1,835 (100%) |
-| Tracks with genre | 1,192 (65%) |
-| Tracks with key | 0 (0% — needs `analyze key --apply`) |
-| Tracks with rating | 5 |
-| Total crates | 0 (crate sync not yet implemented) |
-| Track file location | `/home/barc/Music/All_Tracks/` |
 
 ---
 
@@ -162,79 +145,59 @@ Note: 125–130 and 128–135 intentionally overlap — tracks at 128–130 BPM 
 
 | Priority | Item |
 |----------|------|
-| Medium | Tracks missing key — run `multidj analyze key --apply` (needs `pip install librosa`) |
-| Medium | Genre normalization pending — run `multidj clean genres --apply` |
-| Medium | Energy normalization is library-relative: single-track batch gets `energy=0.5` (lo==hi case) |
+| Medium | Fingerprint enrichment (Phase 8) not yet built — unknown tracks have no AcoustID lookup |
+| Medium | MCP server (Phase 11) not yet built — commands not agent-callable |
 | Low | `mixxx-tool` legacy alias still active |
 | Low | Crates created directly in Mixxx are overwritten on next `sync mixxx --apply` |
+| Low | Energy normalization is library-relative: single-track batch gets `energy=0.5` |
 
 ---
 
-## Technical Decisions
+## Installation
 
-| Decision | Rationale |
-|----------|-----------|
-| MultiDJ owns `~/.multidj/library.sqlite` | Software-agnostic source of truth; DJ apps are sync targets |
-| Mixxx is the primary sync target | Open-source, cross-platform, extensible — gold standard for open-source DJs |
-| `sync_state` dirty-flag trigger | Any `UPDATE tracks` automatically marks affected adapter rows dirty — sync is always aware |
-| `INSERT OR REPLACE` on import | Idempotent import; running twice produces same result |
-| `PRAGMA table_info(keys)` before key lookup | Mixxx's keys table column name is not guaranteed — defensive detection |
-| Wrong-DB guard in every command | Clear error when user accidentally points at Mixxx DB before running import |
-| Fixture DB with 10 canonical tracks | Ground truth for all tests; covers every edge case the commands handle |
-| `backup_dir` param on write commands | Required for test isolation — tests can't write to `~/.multidj/backups/` |
-| Keeper sort: plays → rating → filesize | Deterministic, no user input needed; preserves most-used copy |
-| `timesplayed` → `play_count` | MultiDJ uses standard naming; Mixxx quirk hidden behind adapter |
-| BPM ranges 125–130 and 128–135 overlap | Tracks in the overlap belong in both Tech House and Techno crates by genre convention |
-| librosa for BPM + key, pyacoustid for fingerprint | Same libraries beets uses — battle-tested, no external binary required for core analysis |
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/pip install -r requirements-dev.txt
+source .venv/bin/activate
 
----
+# Optional extras
+uv sync --extra analysis     # librosa — BPM, key, energy analysis
+uv sync --extra embeddings   # torch, torchaudio, transformers, librosa, umap-learn, hdbscan, openai, allin1 — embeddings, clustering, cue detection
+```
 
 ## Usage Quick-Reference
 
 ```bash
-# Bootstrap (from Mixxx)
-multidj import mixxx --apply
+# One-time bootstrap
+multidj import mixxx --apply               # from Mixxx
+multidj import directory ~/Music --apply   # from raw files
 
-# Bootstrap (from raw files)
-multidj import directory ~/Music/All_Tracks --apply
-
-# Primary daily workflow (chains all 8 steps)
+# Daily workflow (all 13 steps)
 multidj pipeline --apply
-multidj pipeline --apply --skip-bpm --skip-key   # skip slow analysis
+multidj pipeline --apply --skip-embed --skip-cluster --skip-cues  # skip slow ML steps
 
-# Individual steps
+# Analysis
+multidj analyze bpm --apply
+multidj analyze key --apply
+multidj analyze energy --apply
+multidj analyze cues --apply               # auto-detect intro/drop/outro (requires embeddings extra)
+multidj analyze embed --apply              # CLAP embeddings (requires embeddings extra)
+multidj cluster vibe --apply              # Vibe/ crates from embeddings
+
+# DJ tools
+multidj similar "Artist - Track.mp3"      # find sonically similar tracks
+multidj triage --crate "New Tracks"       # keyboard audition via mpv
+multidj cues clear --apply               # wipe all auto-detected cues
+
+# Library maintenance
 multidj scan
 multidj audit genres
 multidj clean genres --apply
-multidj parse --apply
-multidj analyze bpm --apply        # detect BPM from audio (requires librosa)
-multidj analyze key --apply        # detect key from audio (requires librosa)
-multidj analyze energy --apply     # detect energy score (requires librosa)
-multidj crates rebuild --apply     # genre + BPM + key + energy + language crates
-multidj sync mixxx --apply         # tracks + crates → Mixxx
-
-# One-off operations
-multidj dedupe
+multidj crates rebuild --apply
+multidj sync mixxx --apply
 multidj dedupe --apply
-multidj enrich language
 
 # Testing
-.venv/bin/pytest tests/ -v   # 132 tests
+.venv/bin/pytest tests/ -v   # 271 tests
 ```
-
-## Repository Sync Note (2026-04-30)
-
-- Clean text behavior now strips promotional noise markers from artist/title tails, including free, dl, and download variants.
-- BPM analysis now samples start/middle/end windows and reports variable-tempo cases instead of hiding half/double-time ambiguity.
-- Directory import now includes artist-title swap mismatch detection for stronger metadata hygiene during ingestion.
-- Directory import now soft-deletes (`deleted=1`) tracks whose files no longer exist on disk after a rescan.
-- Pipeline expanded to 10 steps: `fix_mismatches` (step 2) auto-corrects artist/title swaps across all active tracks; `clean_text` (step 8) strips promo markers from artist/title/album.
-- Added persistent DB path config: `multidj config set-db <path>` stores `[db].path`, and commands now use it when `--db` is omitted.
-- Parse now skips junk artist/title proposals (numeric-only and `free`/`dl`/`download` marker values) to reduce bad suggestions in common use.
-- Added `multidj report dashboard` for standalone interactive HTML dashboard output with optional `--output` path.
-- Pipeline report step now generates the interactive dashboard by default while remaining read-only and non-fatal.
-- Added experimental Camelot harmonic transition analysis/visualization in crate views (UI-only interactions, no DB persistence).
-
-## Repository Sync Note (2026-05-05)
-
-- `sync mixxx` key handling fixed: writes Camelot string directly to `library.key` (VARCHAR(8)) instead of looking up a non-existent `keys` table. Previous versions assumed a `keys` table with `key_text` column and `key_id` FK on `library`, which doesn't exist in modern Mixxx installs. Now pushes keys directly, resolving the `no such table: keys` error that blocked all track syncs.

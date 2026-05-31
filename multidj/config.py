@@ -98,3 +98,20 @@ def get_llm_config(cfg: dict[str, Any] | None = None) -> dict[str, Any] | None:
         "api_key": llm["api_key"],
         "model": llm.get("model", "gpt-3.5-turbo"),
     }
+
+
+def get_enrich_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return enrichment config with discogs (or None) and musicbrainz sections."""
+    if cfg is None:
+        cfg = load_config()
+    discogs = cfg.get("discogs", {})
+    mb = cfg.get("musicbrainz", {})
+    return {
+        "discogs": {
+            "token": discogs["token"],
+            "user_agent": discogs.get("user_agent", "multidj/1.0"),
+        } if discogs.get("token") else None,
+        "musicbrainz": {
+            "user_agent": mb.get("user_agent", "multidj/1.0 (bar.cohen@weizmann.ac.il)"),
+        },
+    }

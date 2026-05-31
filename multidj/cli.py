@@ -16,7 +16,7 @@ from .config import load_config, save_config, get_music_dir
 from .crates import audit_crates, delete_crates, hide_crates, show_crates, rebuild_crates
 from .db import resolve_db_path
 from .dedupe import dedupe
-from .enrich import enrich_language
+from .enrich import enrich_language, enrich_metadata
 from .parse import parse_library
 from .pipeline import run_pipeline
 from .report import write_dashboard_report
@@ -94,6 +94,30 @@ def _format_enrich_language(data: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_enrich_metadata(data: dict) -> str:
+    mode = data["mode"]
+    candidates = data["total_candidates"]
+    processed = data["processed"]
+    applied = data["applied"]
+    errors = data["errors"]
+    lines = [
+        f"Metadata enrichment — {mode}",
+        "",
+        f"  Candidates : {candidates:,}",
+        f"  Processed  : {processed:,}",
+        f"  Applied    : {applied:,}",
+        f"  Errors     : {errors:,}",
+    ]
+    if errors and data.get("error_details"):
+        lines.append("")
+        lines.append("  Errors:")
+        for e in data["error_details"][:5]:
+            lines.append(f"    [{e['track_id']}] {e['artist'] or ''} — {e['title'] or ''}: {e['error']}")
+        if errors > 5:
+            lines.append(f"    ... and {errors - 5} more (use --json for full list)")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="multidj",
@@ -148,6 +172,18 @@ def build_parser() -> argparse.ArgumentParser:
     enrich_p = sub.add_parser("enrich", help="Enrich track metadata from external signals")
     enrich_sub = enrich_p.add_subparsers(dest="enrich_target", required=True)
     enrich_sub.add_parser("language", help="Detect Hebrew tracks (Unicode range check)")
+    p_enrich_meta = enrich_sub.add_parser(
+        "metadata",
+        help="Fill release_year, label, genre from file tags + Discogs + MusicBrainz",
+    )
+    p_enrich_meta.add_argument("--apply",       action="store_true",
+                               help="Write changes (default: dry-run)")
+    p_enrich_meta.add_argument("--force",       action="store_true",
+                               help="Re-enrich tracks that already have enrichment data")
+    p_enrich_meta.add_argument("--limit",       type=int, default=None,
+                               help="Cap number of tracks processed")
+    p_enrich_meta.add_argument("--write-tags",  action="store_true", dest="write_tags",
+                               help="Also write enriched fields back to audio file tags")
 
     # ── clean ────────────────────────────────────────────────────────────────
     clean_p = sub.add_parser("clean", help="Normalize metadata in bulk")
@@ -290,6 +326,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipeline.add_argument("--skip-import",          action="store_true", dest="skip_import")
     p_pipeline.add_argument("--skip-fix-mismatches",  action="store_true", dest="skip_fix_mismatches")
     p_pipeline.add_argument("--skip-parse",            action="store_true", dest="skip_parse")
+    p_pipeline.add_argument("--skip-enrich",           action="store_true", dest="skip_enrich")
     p_pipeline.add_argument("--skip-bpm",              action="store_true", dest="skip_bpm")
     p_pipeline.add_argument("--skip-key",              action="store_true", dest="skip_key")
     p_pipeline.add_argument("--skip-energy",           action="store_true", dest="skip_energy")
@@ -391,6 +428,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.enrich_target == "language":
             data = enrich_language(args.db)
             emit(_format_enrich_language(data) if not args.json else data, as_json=args.json)
+            return 0
+        elif args.enrich_target == "metadata":
+            from .config import get_enrich_config
+            cfg = load_config()
+            result = enrich_metadata(
+                args.db,
+                apply=args.apply,
+                force=args.force,
+                limit=args.limit,
+                write_tags=args.write_tags,
+                enrich_cfg=get_enrich_config(cfg),
+            )
+            emit(_format_enrich_metadata(result) if not args.json else result, as_json=args.json)
             return 0
 
     elif args.command == "clean":
@@ -553,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_import:          skip.add("import")
         if args.skip_fix_mismatches:  skip.add("fix_mismatches")
         if args.skip_parse:           skip.add("parse")
+        if args.skip_enrich:          skip.add("enrich")
         if args.skip_bpm:             skip.add("bpm")
         if args.skip_key:             skip.add("key")
         if args.skip_energy:          skip.add("energy")
