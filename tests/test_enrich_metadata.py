@@ -454,3 +454,14 @@ def test_enrich_metadata_error_isolation(multidj_db):
 
     assert result["errors"] >= 1
     assert result["applied"] == 0
+
+
+from multidj.cli import main as cli_main
+
+
+def test_cli_enrich_metadata_dry_run(multidj_db, capsys):
+    with patch("multidj.enrich.read_file_tags", return_value={}), \
+         patch("multidj.enrich.search_discogs", return_value=None), \
+         patch("multidj.enrich.search_musicbrainz", return_value=None):
+        rc = cli_main(["--db", str(multidj_db), "enrich", "metadata"])
+    assert rc == 0
