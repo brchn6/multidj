@@ -141,3 +141,85 @@ def test_read_file_tags_extracts_flac_fields():
     assert result["album"] == "Selected Ambient Works"
     assert result["label"] == "R&S Records"
     assert result["genre"] == "Ambient"
+
+
+def test_fuzzy_score_exact_match():
+    from multidj.enrich import _fuzzy_score
+    assert _fuzzy_score("DJ Tiesto", "DJ Tiesto") == 1.0
+
+
+def test_fuzzy_score_close_match():
+    from multidj.enrich import _fuzzy_score
+    score = _fuzzy_score("Massive Attack", "Massive Atack")  # typo
+    assert score > 0.85
+
+
+def test_fuzzy_score_poor_match():
+    from multidj.enrich import _fuzzy_score
+    score = _fuzzy_score("Carl Cox", "Aphex Twin")
+    assert score < 0.5
+
+
+def _make_discogs_release(artist="DJ Tiesto", title="Red Lights",
+                          styles=None, year=2004, label="Black Hole"):
+    rel = MagicMock()
+    rel.artists = [MagicMock()]
+    rel.artists[0].name = artist
+    rel.title = title
+    rel.styles = styles or ["Trance", "Progressive Trance"]
+    rel.year = year
+    rel.labels = [MagicMock()]
+    rel.labels[0].name = label
+    rel.data = {"catno": "BHNL 012"}
+    return rel
+
+
+def test_search_discogs_returns_match_above_threshold():
+    from multidj.enrich import search_discogs
+    mock_release = _make_discogs_release()
+    mock_results = MagicMock()
+    mock_results.__len__ = lambda self: 1
+    mock_results.__getitem__ = lambda self, i: mock_release
+
+    mock_client = MagicMock()
+    mock_client.search.return_value = mock_results
+
+    with patch("time.sleep"):
+        result = search_discogs("DJ Tiesto", "Red Lights", mock_client)
+
+    assert result is not None
+    assert result["styles"] == ["Trance", "Progressive Trance"]
+    assert result["release_year"] == 2004
+    assert result["label"] == "Black Hole"
+    assert result["catalog_number"] == "BHNL 012"
+    assert result["score"] > 0.85
+
+
+def test_search_discogs_returns_none_below_threshold():
+    from multidj.enrich import search_discogs
+    mock_release = _make_discogs_release(artist="Completely Different Artist", title="Unrelated")
+    mock_results = MagicMock()
+    mock_results.__len__ = lambda self: 1
+    mock_results.__getitem__ = lambda self, i: mock_release
+
+    mock_client = MagicMock()
+    mock_client.search.return_value = mock_results
+
+    with patch("time.sleep"):
+        result = search_discogs("Carl Cox", "Pressure", mock_client)
+
+    assert result is None
+
+
+def test_search_discogs_returns_none_on_empty_results():
+    from multidj.enrich import search_discogs
+    mock_results = MagicMock()
+    mock_results.__len__ = lambda self: 0
+
+    mock_client = MagicMock()
+    mock_client.search.return_value = mock_results
+
+    with patch("time.sleep"):
+        result = search_discogs("Unknown", "Track", mock_client)
+
+    assert result is None

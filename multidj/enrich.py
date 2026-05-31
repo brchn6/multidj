@@ -137,3 +137,57 @@ def read_file_tags(filepath: str) -> dict[str, Any]:
             result["genre"] = genre
 
     return result
+
+
+_SCORE_THRESHOLD = 0.85
+
+
+def _fuzzy_score(a: str, b: str) -> float:
+    """Return normalized 0–1 token-set similarity between two strings."""
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        import difflib
+        return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+    return fuzz.token_set_ratio(a, b) / 100.0
+
+
+def _match_score(candidate_artist: str, candidate_title: str,
+                 query_artist: str, query_title: str) -> float:
+    """Combined score: minimum of artist and title similarity."""
+    return min(
+        _fuzzy_score(candidate_artist, query_artist),
+        _fuzzy_score(candidate_title, query_title),
+    )
+
+
+def search_discogs(
+    artist: str,
+    title: str,
+    client: Any,
+    *,
+    threshold: float = _SCORE_THRESHOLD,
+) -> dict[str, Any] | None:
+    """Search Discogs for artist+title. Returns metadata dict or None if no confident match."""
+    time.sleep(2.5)  # 25 req/min rate limit
+    try:
+        results = client.search(f"{artist} {title}", type="release")
+        if len(results) == 0:
+            return None
+        release = results[0]
+        candidate_artist = release.artists[0].name if release.artists else ""
+        candidate_title = release.title or ""
+        score = _match_score(candidate_artist, candidate_title, artist, title)
+        if score < threshold:
+            return None
+        label_name = release.labels[0].name if release.labels else None
+        return {
+            "styles": release.styles or [],
+            "release_year": release.year or None,
+            "label": label_name,
+            "catalog_number": (release.data or {}).get("catno") or None,
+            "score": score,
+            "source": "discogs",
+        }
+    except Exception:
+        return None
