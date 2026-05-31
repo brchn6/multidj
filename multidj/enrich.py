@@ -425,7 +425,7 @@ def enrich_metadata(
         from .config import get_enrich_config
         enrich_cfg = get_enrich_config()
 
-    with connect(db_path, readonly=True) as _guard:
+    with connect(db_path, readonly=False) as _guard:
         ensure_not_empty(_guard)
 
     where = "1=1" if force else (
