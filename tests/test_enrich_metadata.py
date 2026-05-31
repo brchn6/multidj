@@ -276,3 +276,26 @@ def test_search_musicbrainz_returns_none_below_threshold():
         result = search_musicbrainz("Carl Cox", "Pressure",
                                     user_agent="multidj/1.0 (test@example.com)")
     assert result is None
+
+
+def test_write_file_tags_calls_mutagen_save():
+    from multidj.enrich import _write_file_tags
+    mock_file = MagicMock()
+    with patch("mutagen.File", return_value=mock_file):
+        _write_file_tags("/fake/track.mp3", {"release_year": 2003, "label": "Warp"})
+    mock_file.save.assert_called_once()
+
+
+def test_write_file_tags_noop_on_none_file():
+    from multidj.enrich import _write_file_tags
+    with patch("mutagen.File", return_value=None):
+        # Should not raise
+        _write_file_tags("/fake/missing.mp3", {"release_year": 2003})
+
+
+def test_write_file_tags_noop_on_empty_fields():
+    from multidj.enrich import _write_file_tags
+    mock_file = MagicMock()
+    with patch("mutagen.File", return_value=mock_file):
+        _write_file_tags("/fake/track.mp3", {})
+    mock_file.save.assert_not_called()

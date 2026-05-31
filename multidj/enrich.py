@@ -256,3 +256,53 @@ def search_musicbrainz(
         return out
     except Exception:
         return None
+
+
+_TAG_WRITE_MAP = {
+    # field_name: (id3_tag, flac_key, m4a_key)
+    "release_year": ("TDRC", "date", "\xa9day"),
+    "album":        ("TALB", "album", "\xa9alb"),
+    "label":        ("TPUB", "organization", "aART"),
+    "genre":        ("TCON", "genre", "\xa9gen"),
+}
+
+
+def _write_file_tags(filepath: str, fields: dict[str, Any]) -> None:
+    """Write enriched fields back to audio file tags. Skips if mutagen unavailable or file missing."""
+    if not fields:
+        return
+    try:
+        import mutagen
+        import mutagen.id3 as id3
+    except ImportError:
+        return
+
+    try:
+        f = mutagen.File(filepath)
+    except Exception:
+        return
+    if f is None:
+        return
+
+    tags = f.tags
+    is_id3 = tags is not None and hasattr(tags, "getall")
+
+    for field, value in fields.items():
+        if value is None or field not in _TAG_WRITE_MAP:
+            continue
+        id3_tag, flac_key, _m4a_key = _TAG_WRITE_MAP[field]
+        str_val = str(value)
+
+        if is_id3:
+            frame_cls = getattr(id3, id3_tag, None)
+            if frame_cls:
+                f.tags.delall(id3_tag)
+                f.tags.add(frame_cls(encoding=3, text=str_val))
+        else:
+            # FLAC / Vorbis / M4A — key=value list interface
+            try:
+                f[flac_key] = str_val
+            except Exception:
+                pass
+
+    f.save()
