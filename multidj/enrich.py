@@ -410,11 +410,14 @@ def enrich_metadata(
     force: bool = False,
     limit: int | None = None,
     enrich_cfg: dict[str, Any] | None = None,
+    backup_dir: str | None | bool = None,
 ) -> dict[str, Any]:
     """Three-layer metadata enrichment for all active tracks.
 
     Layers: file tags → Discogs → MusicBrainz. Only fills empty fields
     (unless force=True). Writes to DB on apply; optionally writes file tags.
+    Pass backup_dir=False to suppress backup (used by pipeline which already
+    takes one backup at the start).
     """
     from .backup import create_backup
 
@@ -456,6 +459,9 @@ def enrich_metadata(
             "error_details": [],
             "changesets": [],
         }
+
+    if backup_dir is not False:
+        create_backup(db_path, backup_dir=backup_dir)
 
     # Build Discogs client if configured
     discogs_client_obj: Any = None
