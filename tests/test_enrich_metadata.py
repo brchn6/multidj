@@ -1,4 +1,5 @@
 import sqlite3
+import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -244,8 +245,9 @@ def _make_mb_result(artist="Massive Attack", title="Teardrop",
 
 def test_search_musicbrainz_returns_match():
     from multidj.enrich import search_musicbrainz
-    with patch("musicbrainzngs.search_recordings", return_value=_make_mb_result()), \
-         patch("musicbrainzngs.set_useragent"), \
+    mb_mock = MagicMock()
+    mb_mock.search_recordings.return_value = _make_mb_result()
+    with patch.dict(sys.modules, {"musicbrainzngs": mb_mock}), \
          patch("time.sleep"):
         result = search_musicbrainz("Massive Attack", "Teardrop",
                                     user_agent="multidj/1.0 (test@example.com)")
@@ -259,8 +261,9 @@ def test_search_musicbrainz_returns_match():
 
 def test_search_musicbrainz_returns_none_on_empty():
     from multidj.enrich import search_musicbrainz
-    with patch("musicbrainzngs.search_recordings", return_value={"recording-list": []}), \
-         patch("musicbrainzngs.set_useragent"), \
+    mb_mock = MagicMock()
+    mb_mock.search_recordings.return_value = {"recording-list": []}
+    with patch.dict(sys.modules, {"musicbrainzngs": mb_mock}), \
          patch("time.sleep"):
         result = search_musicbrainz("Nobody", "Unknown",
                                     user_agent="multidj/1.0 (test@example.com)")
@@ -269,9 +272,9 @@ def test_search_musicbrainz_returns_none_on_empty():
 
 def test_search_musicbrainz_returns_none_below_threshold():
     from multidj.enrich import search_musicbrainz
-    mb_result = _make_mb_result(artist="Completely Different", title="Unrelated Song")
-    with patch("musicbrainzngs.search_recordings", return_value=mb_result), \
-         patch("musicbrainzngs.set_useragent"), \
+    mb_mock = MagicMock()
+    mb_mock.search_recordings.return_value = _make_mb_result(artist="Completely Different", title="Unrelated Song")
+    with patch.dict(sys.modules, {"musicbrainzngs": mb_mock}), \
          patch("time.sleep"):
         result = search_musicbrainz("Carl Cox", "Pressure",
                                     user_agent="multidj/1.0 (test@example.com)")
@@ -415,7 +418,10 @@ def test_enrich_metadata_apply_writes_discogs_styles(multidj_db):
         "score": 0.95,
         "source": "discogs",
     }
-    with patch("multidj.enrich.read_file_tags", return_value={}), \
+    dc_mock = MagicMock()
+    dc_mock.Client.return_value = MagicMock()
+    with patch.dict(sys.modules, {"discogs_client": dc_mock}), \
+         patch("multidj.enrich.read_file_tags", return_value={}), \
          patch("multidj.enrich.search_discogs", return_value=discogs_data), \
          patch("multidj.enrich.search_musicbrainz", return_value=None):
         result = enrich_metadata(str(multidj_db), apply=True,

@@ -233,6 +233,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_cues.add_argument("--force", action="store_true", help="Re-analyze tracks that already have cues")
     p_cues.add_argument("--limit", type=int, default=None, help="Cap number of tracks to process")
 
+    p_mixxx_blobs = analyze_sub.add_parser(
+        "mixxx-blobs",
+        help="Write Mixxx-compatible analysis BLOBs (BeatGrid, KeyMap) into Mixxx DB",
+    )
+    p_mixxx_blobs.add_argument("--mixxx-db", default=None, dest="mixxx_db",
+                                help="Path to Mixxx DB (default: ~/.mixxx/mixxxdb.sqlite)")
+    p_mixxx_blobs.add_argument("--apply",    action="store_true")
+    p_mixxx_blobs.add_argument("--force",    action="store_true",
+                                help="Overwrite existing Mixxx analysis (default: skip tracks that already have BeatGrid/KeyMap)")
+    p_mixxx_blobs.add_argument("--lock-bpm", action="store_true", dest="lock_bpm",
+                                help="Set bpm_lock=1 so Mixxx never re-analyzes BPM")
+    p_mixxx_blobs.add_argument("--limit",    type=int, default=None)
+    p_mixxx_blobs.add_argument("--no-backup", action="store_true", dest="no_backup")
+
     # ── crates ───────────────────────────────────────────────────────────────
     crates_p = sub.add_parser("crates", help="Crate management")
     crates_sub = crates_p.add_subparsers(dest="crates_target", required=True)
@@ -337,6 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipeline.add_argument("--skip-clean-text",       action="store_true", dest="skip_clean_text")
     p_pipeline.add_argument("--skip-crates",           action="store_true", dest="skip_crates")
     p_pipeline.add_argument("--skip-sync",             action="store_true", dest="skip_sync")
+    p_pipeline.add_argument("--skip-mixxx-blobs",     action="store_true", dest="skip_mixxx_blobs")
     p_pipeline.add_argument("--report-output",         default=None, dest="report_output",
                             help="Output path for HTML report (default: ./multidj_report.html)")
     p_pipeline.add_argument("--skip-report",           action="store_true", dest="skip_report",
@@ -495,6 +510,17 @@ def main(argv: list[str] | None = None) -> int:
                 force=args.force,
                 limit=args.limit,
             )
+        elif args.analyze_target == "mixxx-blobs":
+            from .mixxx_blobs import analyze_mixxx_blobs
+            result = analyze_mixxx_blobs(
+                multidj_db_path=args.db,
+                mixxx_db_path=args.mixxx_db,
+                apply=args.apply,
+                force=args.force,
+                lock_bpm=args.lock_bpm,
+                limit=args.limit,
+                backup_dir=False if args.no_backup else None,
+            )
 
     elif args.command == "crates":
         if args.crates_target == "audit":
@@ -614,6 +640,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_clean_text:      skip.add("clean_text")
         if args.skip_crates:          skip.add("crates")
         if args.skip_sync:            skip.add("sync")
+        if args.skip_mixxx_blobs:    skip.add("mixxx_blobs")
         if args.skip_report:          skip.add("report")
 
         result = run_pipeline(
