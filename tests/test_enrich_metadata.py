@@ -1,5 +1,6 @@
 import sqlite3
 import pytest
+from unittest.mock import MagicMock, patch
 
 from multidj.config import get_enrich_config
 
@@ -44,3 +45,99 @@ def test_get_enrich_config_musicbrainz_custom_agent():
     cfg = {"musicbrainz": {"user_agent": "myapp/2.0 (custom@example.com)"}}
     result = get_enrich_config(cfg)
     assert result["musicbrainz"]["user_agent"] == "myapp/2.0 (custom@example.com)"
+
+
+def _make_id3_mock(tdrc=None, talb=None, tpub=None, tcon=None):
+    """Build a mock mutagen ID3 object with the given tag values."""
+    tags_dict = {}
+    if tdrc:
+        t = MagicMock()
+        t.text = [tdrc]
+        tags_dict["TDRC"] = t
+    if talb:
+        t = MagicMock()
+        t.text = [talb]
+        tags_dict["TALB"] = t
+    if tpub:
+        t = MagicMock()
+        t.text = [tpub]
+        tags_dict["TPUB"] = t
+    if tcon:
+        t = MagicMock()
+        t.text = [tcon]
+        tags_dict["TCON"] = t
+
+    # MagicMock auto-creates 'getall', so hasattr(tags, 'getall') is True — ID3 branch
+    mock_tags = MagicMock()
+    mock_tags.get.side_effect = lambda k, d=None: tags_dict.get(k, d)
+    mock_file = MagicMock()
+    mock_file.tags = mock_tags
+    return mock_file
+
+
+def test_read_file_tags_extracts_id3_year():
+    from multidj.enrich import read_file_tags
+    with patch("mutagen.File", return_value=_make_id3_mock(tdrc="2003-05-12")):
+        result = read_file_tags("/fake/track.mp3")
+    assert result["release_year"] == 2003
+
+
+def test_read_file_tags_extracts_id3_label():
+    from multidj.enrich import read_file_tags
+    with patch("mutagen.File", return_value=_make_id3_mock(tpub="Warp Records")):
+        result = read_file_tags("/fake/track.mp3")
+    assert result["label"] == "Warp Records"
+
+
+def test_read_file_tags_extracts_id3_album_and_genre():
+    from multidj.enrich import read_file_tags
+    with patch("mutagen.File", return_value=_make_id3_mock(talb="Mezzanine", tcon="Trip Hop")):
+        result = read_file_tags("/fake/track.mp3")
+    assert result["album"] == "Mezzanine"
+    assert result["genre"] == "Trip Hop"
+
+
+def test_read_file_tags_returns_empty_on_no_file():
+    from multidj.enrich import read_file_tags
+    with patch("mutagen.File", return_value=None):
+        result = read_file_tags("/fake/missing.mp3")
+    assert result == {}
+
+
+def test_read_file_tags_skips_bad_year():
+    from multidj.enrich import read_file_tags
+    with patch("mutagen.File", return_value=_make_id3_mock(tdrc="not-a-year")):
+        result = read_file_tags("/fake/track.mp3")
+    assert "release_year" not in result
+
+
+def _make_flac_mock(date=None, album=None, organization=None, genre=None):
+    """Build a mock mutagen FLAC/Vorbis object."""
+    tags_dict = {}
+    if date:
+        tags_dict["date"] = [date]
+    if album:
+        tags_dict["album"] = [album]
+    if organization:
+        tags_dict["organization"] = [organization]
+    if genre:
+        tags_dict["genre"] = [genre]
+
+    # spec=["get"] means hasattr(tags, "getall") == False — FLAC/Vorbis branch
+    mock_tags = MagicMock(spec=["get"])
+    mock_tags.get.side_effect = lambda k, d=None: tags_dict.get(k, d)
+    mock_file = MagicMock()
+    mock_file.tags = mock_tags
+    return mock_file
+
+
+def test_read_file_tags_extracts_flac_fields():
+    from multidj.enrich import read_file_tags
+    with patch("mutagen.File", return_value=_make_flac_mock(
+        date="1998", album="Selected Ambient Works", organization="R&S Records", genre="Ambient"
+    )):
+        result = read_file_tags("/fake/track.flac")
+    assert result["release_year"] == 1998
+    assert result["album"] == "Selected Ambient Works"
+    assert result["label"] == "R&S Records"
+    assert result["genre"] == "Ambient"
