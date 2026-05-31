@@ -360,10 +360,11 @@ def enrich_track(
         discogs_data = search_discogs(artist, title, discogs_client)
         if discogs_data:
             for field in ("release_year", "label"):
-                if _accept(field, discogs_data.get(field)):
+                if field not in changes and _accept(field, discogs_data.get(field)):
                     changes[field] = discogs_data[field]
-            if _accept("genre", discogs_data.get("styles", [None])[0] if discogs_data.get("styles") else None):
-                changes["genre"] = discogs_data["styles"][0]
+            first_style = discogs_data.get("styles", [None])[0] if discogs_data.get("styles") else None
+            if "genre" not in changes and _accept("genre", first_style):
+                changes["genre"] = first_style
             styles = discogs_data.get("styles", [])
             source = "discogs"
             score = discogs_data.get("score")
