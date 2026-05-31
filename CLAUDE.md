@@ -141,3 +141,12 @@ No linting config. PEP 8 conventions with type hints throughout.
 - **PoC verified on real library:** 35 tracks encoded at 512-dim, 3 UMAP/HDBSCAN clusters found, 4 `Vibe/` crates written (including `Vibe/Unclassified` for noise). Similarity search returns ranked results. All on CPU only.
 - **Known issue:** CLAP `ClapProcessor` kwarg renamed from `audios=` to `audio=` in newer transformers versions. Current code uses `audio=`. If you downgrade transformers, revert this.
 - **Model weights:** `laion/larger_clap_music` (1.5 GB) cached at `~/.cache/huggingface/hub/` — downloaded once on first `analyze embed --apply`, reused thereafter.
+
+## Repository Sync Note (2026-05-31)
+
+- **Phase 8 (metadata enrichment) implemented:** `multidj/enrich.py` extended with `enrich_metadata()` — three-layer enrichment: (1) file tags via mutagen, (2) Discogs API (token required in `~/.multidj/config.toml` under `[discogs]`), (3) MusicBrainz. Fills `release_year`, `label`, `album`, `genre`, and writes `track_tags` rows (`discogs_styles`, `discogs_primary_style`, `catalog_number`). `enrich metadata --apply [--force] [--limit N] [--write-tags]`. Requires `uv sync --extra enrich`.
+- **Migration 006** adds `release_year` (int) and `label` (text) columns to `tracks`. `enrich_metadata()` opens a write connection before any reads to apply the migration on existing installations.
+- **Pipeline expanded to 17 steps:** `enrich` added as step 4 (after parse, before dedupe); `mixxx_blobs` added as step 7 (after key, before energy). `--skip-enrich`, `--skip-mixxx-blobs` flags available.
+- **`get_enrich_config()` added to `config.py`** — reads `[discogs]` (`token`, `user_agent`) and `[musicbrainz]` (`user_agent`) sections; returns `None` for discogs if not configured (MusicBrainz layer still runs offline).
+- **Mixxx pre-analysis BLOBs implemented:** `multidj/mixxx_blobs.py` — hand-rolled protobuf encoder writes BeatGrid-2.0 and KeyMap-1.0 BLOBs directly into Mixxx SQLite so tracks open pre-analyzed. `analyze mixxx-blobs --apply [--force] [--lock-bpm] [--limit N]`. No protobuf dependency. By default skips tracks that already have Mixxx analysis (use `--force` to overwrite); `--lock-bpm` sets `bpm_lock=1` without clearing existing locks on other runs.
+- **Test suite updated:** 283 tests passing (8 pre-existing numpy/extras failures). `tests/fixtures/mixxx_factory.py` extended with `beats`/`keys`/`bpm_lock` columns; `test_enrich_metadata.py` uses `sys.modules` mocking so tests pass without `[enrich]` extras installed.
