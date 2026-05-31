@@ -28,6 +28,11 @@ embeddings = [
     "openai>=1.0",
     "allin1>=0.1.0",
 ]
+enrich = [
+    "musicbrainzngs>=0.7",
+    "python3-discogs-client>=2.3",
+    "rapidfuzz>=3.0",
+]
 
 [project.scripts]
 multidj = "multidj.cli:main"
