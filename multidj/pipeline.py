@@ -29,7 +29,7 @@ def run_pipeline(
     backup_dir: str | None | bool = None,  # False = suppress backup (sentinel)
     limit: int | None = None,
 ) -> dict[str, Any]:
-    """Run the full MultiDJ pipeline: import → parse → dedupe → bpm → key → energy → embed → cluster → cues → genres → clean_text → crates → sync → report.
+    """Run the full MultiDJ pipeline: import → parse → dedupe → bpm → key → mixxx_blobs → energy → embed → cluster → cues → genres → clean_text → crates → sync → report.
 
     Steps run sequentially. One failure does not abort remaining steps.
     Config toggles auto-skip analysis steps for disabled crate dimensions.
@@ -53,6 +53,8 @@ def run_pipeline(
         skip = skip | {"clean_text"}
     if not cfg.get("pipeline", {}).get("cues", True):
         skip = skip | {"cues"}
+    if not cfg.get("pipeline", {}).get("mixxx_blobs", True):
+        skip = skip | {"mixxx_blobs"}
     if skip_report:
         skip = skip | {"report"}
 
@@ -124,7 +126,24 @@ def run_pipeline(
         limit=limit,
     ))
 
-    # Step 7: Detect energy
+    # Step 7: Write Mixxx analysis BLOBs (BeatGrid + KeyMap) into Mixxx DB
+    # Requires mixxx_db_path to be configured.
+    if mixxx_db_path:
+        from .mixxx_blobs import analyze_mixxx_blobs as _amb
+        steps.append(_run_step(
+            "mixxx_blobs", _amb,
+            multidj_db_path=db_path, mixxx_db_path=mixxx_db_path,
+            apply=apply, backup_dir=False,
+            limit=limit,
+        ))
+    else:
+        steps.append({
+            "step": "mixxx_blobs",
+            "status": "skipped",
+            "reason": "mixxx_db_path not set",
+        })
+
+    # Step 8: Detect energy
     steps.append(_run_step(
         "energy", analyze_energy,
         db_path=db_path, apply=apply, backup_dir=False,
