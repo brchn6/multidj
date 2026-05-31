@@ -223,3 +223,56 @@ def test_search_discogs_returns_none_on_empty_results():
         result = search_discogs("Unknown", "Track", mock_client)
 
     assert result is None
+
+
+def _make_mb_result(artist="Massive Attack", title="Teardrop",
+                    date="1998-03-09", album="Mezzanine",
+                    label="Virgin", genre_tag="Trip Hop"):
+    recording = {
+        "id": "abc-123",
+        "title": title,
+        "artist-credit": [{"artist": {"name": artist}}],
+        "release-list": [{
+            "title": album,
+            "date": date,
+            "label-info-list": [{"label": {"name": label}}],
+        }],
+        "tag-list": [{"name": genre_tag, "count": "10"}],
+    }
+    return {"recording-list": [recording], "recording-count": 1}
+
+
+def test_search_musicbrainz_returns_match():
+    from multidj.enrich import search_musicbrainz
+    with patch("musicbrainzngs.search_recordings", return_value=_make_mb_result()), \
+         patch("musicbrainzngs.set_useragent"), \
+         patch("time.sleep"):
+        result = search_musicbrainz("Massive Attack", "Teardrop",
+                                    user_agent="multidj/1.0 (test@example.com)")
+    assert result is not None
+    assert result["release_year"] == 1998
+    assert result["album"] == "Mezzanine"
+    assert result["label"] == "Virgin"
+    assert result["genre"] == "Trip Hop"
+    assert result["score"] > 0.85
+
+
+def test_search_musicbrainz_returns_none_on_empty():
+    from multidj.enrich import search_musicbrainz
+    with patch("musicbrainzngs.search_recordings", return_value={"recording-list": []}), \
+         patch("musicbrainzngs.set_useragent"), \
+         patch("time.sleep"):
+        result = search_musicbrainz("Nobody", "Unknown",
+                                    user_agent="multidj/1.0 (test@example.com)")
+    assert result is None
+
+
+def test_search_musicbrainz_returns_none_below_threshold():
+    from multidj.enrich import search_musicbrainz
+    mb_result = _make_mb_result(artist="Completely Different", title="Unrelated Song")
+    with patch("musicbrainzngs.search_recordings", return_value=mb_result), \
+         patch("musicbrainzngs.set_useragent"), \
+         patch("time.sleep"):
+        result = search_musicbrainz("Carl Cox", "Pressure",
+                                    user_agent="multidj/1.0 (test@example.com)")
+    assert result is None

@@ -191,3 +191,68 @@ def search_discogs(
         }
     except Exception:
         return None
+
+
+def search_musicbrainz(
+    artist: str,
+    title: str,
+    user_agent: str,
+    *,
+    threshold: float = _SCORE_THRESHOLD,
+) -> dict[str, Any] | None:
+    """Search MusicBrainz for artist+title. Returns metadata dict or None."""
+    try:
+        import musicbrainzngs
+    except ImportError:
+        return None
+
+    musicbrainzngs.set_useragent(*user_agent.split("/", 1)[0:1], "1.0", user_agent)
+    time.sleep(1.0)  # 1 req/sec rate limit
+    try:
+        result = musicbrainzngs.search_recordings(
+            artist=artist, recording=title, limit=5
+        )
+        recordings = result.get("recording-list", [])
+        if not recordings:
+            return None
+
+        rec = recordings[0]
+        credits = rec.get("artist-credit", [])
+        candidate_artist = credits[0]["artist"]["name"] if credits else ""
+        candidate_title = rec.get("title", "")
+        score = _match_score(candidate_artist, candidate_title, artist, title)
+        if score < threshold:
+            return None
+
+        releases = rec.get("release-list", [])
+        release_year: int | None = None
+        album: str | None = None
+        label: str | None = None
+        if releases:
+            rel = releases[0]
+            date_str = rel.get("date", "")
+            if date_str:
+                try:
+                    release_year = int(date_str[:4])
+                except ValueError:
+                    pass
+            album = rel.get("title") or None
+            label_info = rel.get("label-info-list", [])
+            if label_info:
+                label = label_info[0].get("label", {}).get("name") or None
+
+        tags = rec.get("tag-list", [])
+        genre: str | None = tags[0]["name"] if tags else None
+
+        out: dict[str, Any] = {"score": score, "source": "musicbrainz"}
+        if release_year:
+            out["release_year"] = release_year
+        if album:
+            out["album"] = album
+        if label:
+            out["label"] = label
+        if genre:
+            out["genre"] = genre
+        return out
+    except Exception:
+        return None
