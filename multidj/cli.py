@@ -430,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
             emit(_format_enrich_language(data) if not args.json else data, as_json=args.json)
             return 0
         elif args.enrich_target == "metadata":
-            from .config import get_enrich_config, load_config
+            from .config import get_enrich_config
             cfg = load_config()
             result = enrich_metadata(
                 args.db,
