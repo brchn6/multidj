@@ -36,7 +36,7 @@ def test_dry_run_returns_step_summaries(multidj_db, mixxx_db, cfg, tmp_path):
     )
     assert result["mode"] == "dry_run"
     assert "steps" in result
-    assert len(result["steps"]) == 15
+    assert len(result["steps"]) == 16
     step_names = [s["step"] for s in result["steps"]]
     assert "fix_mismatches" in step_names
     assert "clean_text" in step_names
