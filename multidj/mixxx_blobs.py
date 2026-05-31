@@ -232,6 +232,7 @@ def analyze_mixxx_blobs(
     mixxx_db_path: str | None = None,
     *,
     apply: bool = False,
+    force: bool = False,
     lock_bpm: bool = False,
     limit: int | None = None,
     backup_dir: str | None = None,
@@ -325,9 +326,10 @@ def analyze_mixxx_blobs(
             artist = row["artist"] or ""
             title = row["title"] or ""
 
-            # Look up Mixxx library row by file path
+            # Look up Mixxx library row by file path; also fetch existing analysis state
             lib_row = mixxx_conn.execute(
-                """SELECT l.id FROM library l
+                """SELECT l.id, l.beats IS NOT NULL AS has_beats, l.keys IS NOT NULL AS has_keys
+                   FROM library l
                    JOIN track_locations tl ON l.location = tl.id
                    WHERE tl.location = ?""",
                 (path,),
@@ -338,6 +340,8 @@ def analyze_mixxx_blobs(
                 continue
 
             lib_id = lib_row[0]
+            has_beats = bool(lib_row[1])
+            has_keys = bool(lib_row[2])
             wrote_beat = False
             wrote_key = False
             beat_blob = None
@@ -345,13 +349,13 @@ def analyze_mixxx_blobs(
             chromatic_key = 0
             key_text = ""
 
-            # BeatGrid BLOB
-            if bpm and bpm > 0:
+            # BeatGrid BLOB — skip if Mixxx already has one, unless --force
+            if bpm and bpm > 0 and (force or not has_beats):
                 beat_blob = pack_beatgrid(float(bpm))
                 wrote_beat = True
 
-            # KeyMap BLOB
-            if key_str and key_str.strip():
+            # KeyMap BLOB — skip if Mixxx already has one, unless --force
+            if key_str and key_str.strip() and (force or not has_keys):
                 chromatic_key = key_string_to_chromatic(key_str)
                 if chromatic_key == 0:
                     skipped_bad_key += 1
@@ -375,20 +379,22 @@ def analyze_mixxx_blobs(
             if apply:
                 try:
                     if wrote_beat and beat_blob is not None:
-                        mixxx_conn.execute(
-                            """UPDATE library SET
-                               beats = ?, beats_version = ?, beats_sub_version = ?,
-                               bpm = ?, bpm_lock = ?
-                               WHERE id = ?""",
-                            (
-                                beat_blob,
-                                BEATGRID_VERSION,
-                                BEATGRID_SUB_VERSION,
-                                bpm,
-                                1 if lock_bpm else 0,
-                                lib_id,
-                            ),
-                        )
+                        if lock_bpm:
+                            mixxx_conn.execute(
+                                """UPDATE library SET
+                                   beats = ?, beats_version = ?, beats_sub_version = ?,
+                                   bpm = ?, bpm_lock = 1
+                                   WHERE id = ?""",
+                                (beat_blob, BEATGRID_VERSION, BEATGRID_SUB_VERSION, bpm, lib_id),
+                            )
+                        else:
+                            mixxx_conn.execute(
+                                """UPDATE library SET
+                                   beats = ?, beats_version = ?, beats_sub_version = ?,
+                                   bpm = ?
+                                   WHERE id = ?""",
+                                (beat_blob, BEATGRID_VERSION, BEATGRID_SUB_VERSION, bpm, lib_id),
+                            )
                         beat_written += 1
 
                     if key_blob:

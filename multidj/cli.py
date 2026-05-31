@@ -204,6 +204,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_mixxx_blobs.add_argument("--mixxx-db", default=None, dest="mixxx_db",
                                 help="Path to Mixxx DB (default: ~/.mixxx/mixxxdb.sqlite)")
     p_mixxx_blobs.add_argument("--apply",    action="store_true")
+    p_mixxx_blobs.add_argument("--force",    action="store_true",
+                                help="Overwrite existing Mixxx analysis (default: skip tracks that already have BeatGrid/KeyMap)")
     p_mixxx_blobs.add_argument("--lock-bpm", action="store_true", dest="lock_bpm",
                                 help="Set bpm_lock=1 so Mixxx never re-analyzes BPM")
     p_mixxx_blobs.add_argument("--limit",    type=int, default=None)
@@ -464,6 +466,7 @@ def main(argv: list[str] | None = None) -> int:
                 multidj_db_path=args.db,
                 mixxx_db_path=args.mixxx_db,
                 apply=args.apply,
+                force=args.force,
                 lock_bpm=args.lock_bpm,
                 limit=args.limit,
                 backup_dir=False if args.no_backup else None,
