@@ -17,7 +17,7 @@ def test_migration_006_adds_release_year_and_label(multidj_db):
         conn.close()
 
 
-def test_get_enrich_config_returns_none_without_discogs(tmp_path):
+def test_get_enrich_config_returns_none_without_discogs():
     """Returns None for discogs when [discogs] token is absent."""
     cfg = {}
     result = get_enrich_config(cfg)
@@ -25,7 +25,7 @@ def test_get_enrich_config_returns_none_without_discogs(tmp_path):
     assert result["musicbrainz"]["user_agent"] == "multidj/1.0 (bar.cohen@weizmann.ac.il)"
 
 
-def test_get_enrich_config_returns_discogs_when_token_set(tmp_path):
+def test_get_enrich_config_returns_discogs_when_token_set():
     """Returns discogs dict when token is configured."""
     cfg = {
         "discogs": {
@@ -39,7 +39,7 @@ def test_get_enrich_config_returns_discogs_when_token_set(tmp_path):
     assert result["discogs"]["user_agent"] == "multidj/1.0"
 
 
-def test_get_enrich_config_musicbrainz_custom_agent(tmp_path):
+def test_get_enrich_config_musicbrainz_custom_agent():
     """Custom MusicBrainz user_agent is respected."""
     cfg = {"musicbrainz": {"user_agent": "myapp/2.0 (custom@example.com)"}}
     result = get_enrich_config(cfg)
