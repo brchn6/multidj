@@ -91,6 +91,17 @@ multidj pipeline --apply --report-output /path/to/report.html
 
 # Disable report generation
 multidj pipeline --skip-report
+
+
+
+# Basic pipeline run (directory import + BPM/key/energy + crates + Mixxx sync, no embeddings/clustering)
+multidj pipeline --apply \
+  --music-dir '/home/barc/Weizmann Institute Dropbox/Bar Cohen/Music/' \
+  --mixxx-db '/home/barc/Weizmann Institute Dropbox/Bar Cohen/Music/mixxx/mixxxdb.sqlite' \
+  --skip-embed \
+  --skip-cluster
+
+
 ```
 
 ### Interactive Dashboard Report (auto-generated)
