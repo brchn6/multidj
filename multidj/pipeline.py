@@ -10,6 +10,7 @@ from .backup import create_backup
 from .clean import clean_genres, clean_text
 from .crates import rebuild_crates
 from .dedupe import dedupe as _dedupe
+from .enrich import enrich_metadata as _enrich_metadata
 from .parse import parse_library
 
 
@@ -29,7 +30,7 @@ def run_pipeline(
     backup_dir: str | None | bool = None,  # False = suppress backup (sentinel)
     limit: int | None = None,
 ) -> dict[str, Any]:
-    """Run the full MultiDJ pipeline: import → parse → dedupe → bpm → key → energy → embed → cluster → cues → genres → clean_text → crates → sync → report.
+    """Run the full MultiDJ pipeline: import → parse → enrich → dedupe → bpm → key → mixxx_blobs → energy → embed → cluster → cues → genres → clean_text → crates → sync → report.
 
     Steps run sequentially. One failure does not abort remaining steps.
     Config toggles auto-skip analysis steps for disabled crate dimensions.
@@ -53,6 +54,8 @@ def run_pipeline(
         skip = skip | {"clean_text"}
     if not cfg.get("pipeline", {}).get("cues", True):
         skip = skip | {"cues"}
+    if not cfg.get("pipeline", {}).get("mixxx_blobs", True):
+        skip = skip | {"mixxx_blobs"}
     if skip_report:
         skip = skip | {"report"}
 
@@ -103,28 +106,57 @@ def run_pipeline(
         limit=limit,
     ))
 
-    # Step 4: Deduplicate tracks (before analysis to avoid wasted compute)
+    # Step 4: Enrich metadata from file tags + Discogs + MusicBrainz
+    # enrich_metadata degrades gracefully if discogs/musicbrainz extras are missing
+    from .config import get_enrich_config as _gec
+    steps.append(_run_step(
+        "enrich", _enrich_metadata,
+        db_path=db_path, apply=apply,
+        limit=limit,
+        enrich_cfg=_gec(cfg),
+        backup_dir=False,
+    ))
+
+    # Step 5: Deduplicate tracks (before analysis to avoid wasted compute)
     steps.append(_run_step(
         "dedupe", _dedupe,
         db_path=db_path, apply=apply, backup=False,
         limit=limit,
     ))
 
-    # Step 5: Detect BPM
+    # Step 6: Detect BPM
     steps.append(_run_step(
         "bpm", analyze_bpm,
         db_path=db_path, apply=apply, backup_dir=False,
         limit=limit,
     ))
 
-    # Step 6: Detect key
+    # Step 7: Detect key
     steps.append(_run_step(
         "key", analyze_key,
         db_path=db_path, apply=apply,
         limit=limit,
     ))
 
-    # Step 7: Detect energy
+    # Step 7: Write Mixxx analysis BLOBs (BeatGrid + KeyMap) into Mixxx DB
+    # Requires mixxx_db_path to be configured.
+    if mixxx_db_path:
+        from .mixxx_blobs import analyze_mixxx_blobs as _amb
+        steps.append(_run_step(
+            "mixxx_blobs", _amb,
+            multidj_db_path=db_path, mixxx_db_path=mixxx_db_path,
+            apply=apply, backup_dir=False,
+            limit=limit,
+        ))
+    else:
+        steps.append({
+            "step": "mixxx_blobs",
+            "status": "skipped",
+            "reason": "mixxx_db_path not set",
+        })
+
+
+    # Step 8: Detect energy
     steps.append(_run_step(
         "energy", analyze_energy,
         db_path=db_path, apply=apply, backup_dir=False,
@@ -137,7 +169,7 @@ def run_pipeline(
     if not cfg.get("pipeline", {}).get("cluster", True):
         skip = skip | {"cluster"}
 
-    # Step 8: Embed tracks (requires [embeddings] extra)
+    # Step 9: Embed tracks (requires [embeddings] extra)
     def _run_embed(**kwargs):
         try:
             from .embed import analyze_embed as _ae
@@ -151,7 +183,7 @@ def run_pipeline(
         limit=limit,
     ))
 
-    # Step 9: Cluster into Vibe/ crates
+    # Step 10: Cluster into Vibe/ crates
     def _run_cluster(**kwargs):
         try:
             from .cluster import cluster_vibe as _cv
@@ -166,7 +198,7 @@ def run_pipeline(
         min_cluster_size=cfg.get("pipeline", {}).get("min_cluster_size", 5),
     ))
 
-    # Step 10: Detect structural cues (requires embeddings extra)
+    # Step 11: Detect structural cues (requires embeddings extra)
     def _run_cues(**kwargs):
         try:
             from .cues import analyze_cues as _ac
@@ -180,21 +212,21 @@ def run_pipeline(
         limit=limit,
     ))
 
-    # Step 11: Normalize genres
+    # Step 12: Normalize genres
     steps.append(_run_step(
         "genres", clean_genres,
         db_path=db_path, apply=apply, backup=False,
         limit=limit,
     ))
 
-    # Step 12: Clean artist/title/album text noise
+    # Step 13: Clean artist/title/album text noise
     steps.append(_run_step(
         "clean_text", clean_text,
         db_path=db_path, apply=apply, backup=False,
         limit=limit,
     ))
 
-    # Step 13: Rebuild crates (limit not applicable — full rebuild)
+    # Step 14: Rebuild crates (limit not applicable — full rebuild)
     if limit is not None:
         _log(f"[pipeline:crates] --limit ignored (crates require full rebuild)")
     steps.append(_run_step(
@@ -202,7 +234,7 @@ def run_pipeline(
         db_path=db_path, apply=apply, backup=False, cfg=cfg,
     ))
 
-    # Step 14: Sync to Mixxx (limit not applicable — full sync)
+    # Step 15: Sync to Mixxx (limit not applicable — full sync)
     if limit is not None and mixxx_db_path:
         _log(f"[pipeline:sync] --limit ignored (sync pushes all dirty tracks)")
     if mixxx_db_path:
@@ -215,7 +247,7 @@ def run_pipeline(
     else:
         steps.append({"step": "sync", "status": "skipped", "reason": "mixxx_db_path not set"})
 
-    # Step 15: Generate HTML report (read-only)
+    # Step 16: Generate HTML report (read-only)
     def _report_step() -> dict[str, Any]:
         from .report import write_html_report
 

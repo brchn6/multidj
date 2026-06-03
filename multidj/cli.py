@@ -16,7 +16,7 @@ from .config import load_config, save_config, get_music_dir
 from .crates import audit_crates, delete_crates, hide_crates, show_crates, rebuild_crates
 from .db import resolve_db_path
 from .dedupe import dedupe
-from .enrich import enrich_language
+from .enrich import enrich_language, enrich_metadata
 from .parse import parse_library
 from .pipeline import run_pipeline
 from .report import write_dashboard_report
@@ -94,6 +94,30 @@ def _format_enrich_language(data: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_enrich_metadata(data: dict) -> str:
+    mode = data["mode"]
+    candidates = data["total_candidates"]
+    processed = data["processed"]
+    applied = data["applied"]
+    errors = data["errors"]
+    lines = [
+        f"Metadata enrichment — {mode}",
+        "",
+        f"  Candidates : {candidates:,}",
+        f"  Processed  : {processed:,}",
+        f"  Applied    : {applied:,}",
+        f"  Errors     : {errors:,}",
+    ]
+    if errors and data.get("error_details"):
+        lines.append("")
+        lines.append("  Errors:")
+        for e in data["error_details"][:5]:
+            lines.append(f"    [{e['track_id']}] {e['artist'] or ''} — {e['title'] or ''}: {e['error']}")
+        if errors > 5:
+            lines.append(f"    ... and {errors - 5} more (use --json for full list)")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="multidj",
@@ -148,6 +172,18 @@ def build_parser() -> argparse.ArgumentParser:
     enrich_p = sub.add_parser("enrich", help="Enrich track metadata from external signals")
     enrich_sub = enrich_p.add_subparsers(dest="enrich_target", required=True)
     enrich_sub.add_parser("language", help="Detect Hebrew tracks (Unicode range check)")
+    p_enrich_meta = enrich_sub.add_parser(
+        "metadata",
+        help="Fill release_year, label, genre from file tags + Discogs + MusicBrainz",
+    )
+    p_enrich_meta.add_argument("--apply",       action="store_true",
+                               help="Write changes (default: dry-run)")
+    p_enrich_meta.add_argument("--force",       action="store_true",
+                               help="Re-enrich tracks that already have enrichment data")
+    p_enrich_meta.add_argument("--limit",       type=int, default=None,
+                               help="Cap number of tracks processed")
+    p_enrich_meta.add_argument("--write-tags",  action="store_true", dest="write_tags",
+                               help="Also write enriched fields back to audio file tags")
 
     # ── clean ────────────────────────────────────────────────────────────────
     clean_p = sub.add_parser("clean", help="Normalize metadata in bulk")
@@ -196,6 +232,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_cues.add_argument("--apply", action="store_true", help="Write cues to DB (default: dry-run)")
     p_cues.add_argument("--force", action="store_true", help="Re-analyze tracks that already have cues")
     p_cues.add_argument("--limit", type=int, default=None, help="Cap number of tracks to process")
+
+    p_mixxx_blobs = analyze_sub.add_parser(
+        "mixxx-blobs",
+        help="Write Mixxx-compatible analysis BLOBs (BeatGrid, KeyMap) into Mixxx DB",
+    )
+    p_mixxx_blobs.add_argument("--mixxx-db", default=None, dest="mixxx_db",
+                                help="Path to Mixxx DB (default: ~/.mixxx/mixxxdb.sqlite)")
+    p_mixxx_blobs.add_argument("--apply",    action="store_true")
+    p_mixxx_blobs.add_argument("--force",    action="store_true",
+                                help="Overwrite existing Mixxx analysis (default: skip tracks that already have BeatGrid/KeyMap)")
+    p_mixxx_blobs.add_argument("--lock-bpm", action="store_true", dest="lock_bpm",
+                                help="Set bpm_lock=1 so Mixxx never re-analyzes BPM")
+    p_mixxx_blobs.add_argument("--limit",    type=int, default=None)
+    p_mixxx_blobs.add_argument("--no-backup", action="store_true", dest="no_backup")
 
     # ── crates ───────────────────────────────────────────────────────────────
     crates_p = sub.add_parser("crates", help="Crate management")
@@ -290,6 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipeline.add_argument("--skip-import",          action="store_true", dest="skip_import")
     p_pipeline.add_argument("--skip-fix-mismatches",  action="store_true", dest="skip_fix_mismatches")
     p_pipeline.add_argument("--skip-parse",            action="store_true", dest="skip_parse")
+    p_pipeline.add_argument("--skip-enrich",           action="store_true", dest="skip_enrich")
     p_pipeline.add_argument("--skip-bpm",              action="store_true", dest="skip_bpm")
     p_pipeline.add_argument("--skip-key",              action="store_true", dest="skip_key")
     p_pipeline.add_argument("--skip-energy",           action="store_true", dest="skip_energy")
@@ -300,6 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipeline.add_argument("--skip-clean-text",       action="store_true", dest="skip_clean_text")
     p_pipeline.add_argument("--skip-crates",           action="store_true", dest="skip_crates")
     p_pipeline.add_argument("--skip-sync",             action="store_true", dest="skip_sync")
+    p_pipeline.add_argument("--skip-mixxx-blobs",     action="store_true", dest="skip_mixxx_blobs")
     p_pipeline.add_argument("--report-output",         default=None, dest="report_output",
                             help="Output path for HTML report (default: ./multidj_report.html)")
     p_pipeline.add_argument("--skip-report",           action="store_true", dest="skip_report",
@@ -392,6 +444,19 @@ def main(argv: list[str] | None = None) -> int:
             data = enrich_language(args.db)
             emit(_format_enrich_language(data) if not args.json else data, as_json=args.json)
             return 0
+        elif args.enrich_target == "metadata":
+            from .config import get_enrich_config
+            cfg = load_config()
+            result = enrich_metadata(
+                args.db,
+                apply=args.apply,
+                force=args.force,
+                limit=args.limit,
+                write_tags=args.write_tags,
+                enrich_cfg=get_enrich_config(cfg),
+            )
+            emit(_format_enrich_metadata(result) if not args.json else result, as_json=args.json)
+            return 0
 
     elif args.command == "clean":
         kwargs = dict(db_path=args.db, apply=args.apply, limit=args.limit, backup=not args.no_backup)
@@ -444,6 +509,17 @@ def main(argv: list[str] | None = None) -> int:
                 apply=args.apply,
                 force=args.force,
                 limit=args.limit,
+            )
+        elif args.analyze_target == "mixxx-blobs":
+            from .mixxx_blobs import analyze_mixxx_blobs
+            result = analyze_mixxx_blobs(
+                multidj_db_path=args.db,
+                mixxx_db_path=args.mixxx_db,
+                apply=args.apply,
+                force=args.force,
+                lock_bpm=args.lock_bpm,
+                limit=args.limit,
+                backup_dir=False if args.no_backup else None,
             )
 
     elif args.command == "crates":
@@ -553,6 +629,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_import:          skip.add("import")
         if args.skip_fix_mismatches:  skip.add("fix_mismatches")
         if args.skip_parse:           skip.add("parse")
+        if args.skip_enrich:          skip.add("enrich")
         if args.skip_bpm:             skip.add("bpm")
         if args.skip_key:             skip.add("key")
         if args.skip_energy:          skip.add("energy")
@@ -563,6 +640,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_clean_text:      skip.add("clean_text")
         if args.skip_crates:          skip.add("crates")
         if args.skip_sync:            skip.add("sync")
+        if args.skip_mixxx_blobs:    skip.add("mixxx_blobs")
         if args.skip_report:          skip.add("report")
 
         result = run_pipeline(

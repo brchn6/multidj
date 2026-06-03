@@ -26,19 +26,27 @@ CREATE TABLE IF NOT EXISTS keys (
 );
 
 CREATE TABLE IF NOT EXISTS library (
-    id             INTEGER PRIMARY KEY,
-    artist         TEXT,
-    title          TEXT,
-    album          TEXT,
-    genre          TEXT,
-    bpm            REAL,
-    key_id         INTEGER,
-    rating         INTEGER,
-    timesplayed    INTEGER DEFAULT 0,
-    duration       REAL,
-    remixer        TEXT,
-    mixxx_deleted  INTEGER DEFAULT 0,
-    location       INTEGER  -- FK to track_locations.id
+    id                  INTEGER PRIMARY KEY,
+    artist              TEXT,
+    title               TEXT,
+    album               TEXT,
+    genre               TEXT,
+    bpm                 REAL,
+    bpm_lock            INTEGER DEFAULT 0,
+    key_id              INTEGER,
+    key                 TEXT,
+    rating              INTEGER,
+    timesplayed         INTEGER DEFAULT 0,
+    duration            REAL,
+    remixer             TEXT,
+    mixxx_deleted       INTEGER DEFAULT 0,
+    location            INTEGER,
+    beats               BLOB,
+    beats_version       TEXT,
+    beats_sub_version   TEXT,
+    keys                BLOB,
+    keys_version        TEXT,
+    keys_sub_version    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS crates (
