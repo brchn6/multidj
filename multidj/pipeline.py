@@ -260,6 +260,16 @@ def run_pipeline(
 
     steps.append(_run_step("report", _report_step))
 
+    # Print report path so user can Ctrl+click it
+    report_result = steps[-1]
+    if report_result.get("status") == "ok":
+        report_path = report_result.get("result", {}).get("path", "")
+        if report_path:
+            abs_path = Path(report_path).resolve()
+            _log(f"\n━━━ Report ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            _log(f"  file://{abs_path}")
+            _log(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
     errors = [s for s in steps if s["status"] == "error"]
     return {
         "mode": mode,
