@@ -12,7 +12,7 @@ from .analyze import analyze_key
 from .audit import audit_genres, audit_metadata, audit_mismatches
 from .backup import create_backup
 from .clean import clean_genres, clean_text
-from .config import load_config, save_config, get_music_dir
+from .config import load_config, save_config, get_music_dir, get_mixxx_db_path
 from .crates import audit_crates, delete_crates, hide_crates, show_crates, rebuild_crates
 from .db import resolve_db_path
 from .dedupe import dedupe
@@ -511,10 +511,12 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
             )
         elif args.analyze_target == "mixxx-blobs":
+            cfg = load_config()
+            mixxx_db = args.mixxx_db or get_mixxx_db_path(cfg)
             from .mixxx_blobs import analyze_mixxx_blobs
             result = analyze_mixxx_blobs(
                 multidj_db_path=args.db,
-                mixxx_db_path=args.mixxx_db,
+                mixxx_db_path=mixxx_db,
                 apply=args.apply,
                 force=args.force,
                 lock_bpm=args.lock_bpm,
@@ -586,7 +588,9 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "import":
         if args.import_target == "mixxx":
-            adapter = MixxxAdapter(mixxx_db_path=args.mixxx_db)
+            cfg = load_config()
+            mixxx_db = args.mixxx_db or get_mixxx_db_path(cfg)
+            adapter = MixxxAdapter(mixxx_db_path=mixxx_db)
             if args.apply and not args.no_backup:
                 create_backup(args.db)
             result = adapter.import_all(
@@ -605,7 +609,9 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "sync":
         if args.sync_target == "mixxx":
-            adapter = MixxxAdapter(mixxx_db_path=args.mixxx_db)
+            cfg = load_config()
+            mixxx_db = args.mixxx_db or get_mixxx_db_path(cfg)
+            adapter = MixxxAdapter(mixxx_db_path=mixxx_db)
             result = adapter.full_sync(
                 multidj_db_path=resolve_db_path(args.db),
                 apply=args.apply,
@@ -643,9 +649,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_mixxx_blobs:    skip.add("mixxx_blobs")
         if args.skip_report:          skip.add("report")
 
+        mixxx_db = args.mixxx_db or get_mixxx_db_path(cfg)
         result = run_pipeline(
             db_path=args.db,
-            mixxx_db_path=args.mixxx_db,
+            mixxx_db_path=mixxx_db,
             cfg=cfg,
             apply=args.apply,
             music_dir=music_dir,

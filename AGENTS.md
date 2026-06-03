@@ -44,6 +44,8 @@ Agent operating guide for this repository.
 - Soft-delete semantics must be preserved (`tracks.deleted = 1`), not hard delete.
 - Active-track logic must consistently exclude deleted rows (`deleted = 0`).
 - Analyze commands should keep per-track error isolation.
+- Pipeline is idempotent and incremental — all analyze steps skip already-processed tracks; safe to re-run daily.
+- Mixxx DB path can be set in `~/.multidj/config.toml` under `[mixxx].path`; all Mixxx commands fall back to it when `--mixxx-db` is omitted.
 
 ## Codebase Landmarks
 
@@ -51,6 +53,7 @@ Agent operating guide for this repository.
 - DB connect/migrations/guards: [multidj/db.py](multidj/db.py)
 - Backup flow: [multidj/backup.py](multidj/backup.py)
 - End-to-end pipeline orchestrator: [multidj/pipeline.py](multidj/pipeline.py)
+- Config system (load/save/music_dir/mixxx_db/llm): [multidj/config.py](multidj/config.py)
 - Mixxx sync adapter: [multidj/adapters/mixxx.py](multidj/adapters/mixxx.py)
 - Directory import adapter: [multidj/adapters/directory.py](multidj/adapters/directory.py)
 - Crate logic and protection model: [multidj/crates.py](multidj/crates.py)
@@ -87,6 +90,12 @@ Agent operating guide for this repository.
 - Added `multidj report dashboard` for standalone interactive HTML dashboard output with optional `--output` path.
 - Pipeline report step now generates the interactive dashboard by default while remaining read-only and non-fatal.
 - Added experimental Camelot harmonic transition analysis/visualization in crate views (UI-only interactions, no DB persistence).
+
+## Repository Sync Note (2026-06-03)
+
+- **`[mixxx]` config section + `get_mixxx_db_path()` added to `config.py`:** Mixxx DB path can be stored in `~/.multidj/config.toml` under `[mixxx].path`. CLI fallback wired in `pipeline`, `sync mixxx`, `import mixxx`, and `analyze mixxx-blobs` via `args.mixxx_db or get_mixxx_db_path(cfg)`.
+- **Pipeline idempotency documented:** All analyze steps skip already-processed tracks (WHERE field IS NULL / LEFT JOIN check). Safe to re-run pipeline daily.
+- **Source-of-truth clarified via `sync_state` trigger:** AFTER UPDATE trigger on `tracks` sets `dirty=1`; `full_sync` only pushes `dirty=1 AND deleted=0` tracks.
 
 ## Repository Sync Note (2026-05-27)
 

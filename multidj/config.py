@@ -30,6 +30,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "low_max":  0.33,
         "high_min": 0.67,
     },
+    "mixxx": {
+        "path": "",
+    },
 }
 
 _DEFAULT_CONFIG_PATH = Path.home() / ".multidj" / "config.toml"
@@ -83,6 +86,11 @@ def save_config(cfg: dict[str, Any], path: Path | None = None) -> None:
 
 def get_music_dir(cfg: dict[str, Any]) -> str | None:
     val = cfg.get("pipeline", {}).get("music_dir", "")
+    return val.strip() or None
+
+
+def get_mixxx_db_path(cfg: dict[str, Any]) -> str | None:
+    val = cfg.get("mixxx", {}).get("path", "")
     return val.strip() or None
 
 

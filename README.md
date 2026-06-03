@@ -40,8 +40,12 @@ You never pass the Mixxx DB as `--db`. The `--db` flag (or `multidj config set-d
 # 1. Import your Mixxx library into the MultiDJ DB (reads Mixxx, writes to ~/.multidj/library.sqlite)
 multidj import mixxx --apply
 
-# 2. (Optional) Store your Mixxx DB path in config so --mixxx-db is automatic
+# 2. (Optional) Store your MultiDJ DB path so --db is automatic
 multidj config set-db ~/.multidj/library.sqlite   # only needed if you want a non-default path
+
+# 3. (Optional) Set [mixxx].path in ~/.multidj/config.toml so --mixxx-db is automatic:
+#    [mixxx]
+#    path = "~/.mixxx/mixxxdb.sqlite"
 ```
 
 If you don't use Mixxx, import directly from your music folder:
@@ -54,19 +58,21 @@ multidj import directory ~/Music/All_Tracks --apply
 
 ```bash
 # Full pipeline: import new tracks → clean → analyze → rebuild crates → sync to Mixxx
-multidj pipeline --apply \
-  --music-dir ~/Music/All_Tracks \
-  --mixxx-db ~/.mixxx/mixxxdb.sqlite
+# (--music-dir and --mixxx-db come from ~/.multidj/config.toml automatically)
+multidj pipeline --apply
 
 # Dry-run first to preview what would change
-multidj pipeline \
-  --music-dir ~/Music/All_Tracks \
-  --mixxx-db ~/.mixxx/mixxxdb.sqlite
+multidj pipeline
+
+# Override paths for one-off runs
+multidj pipeline --apply \
+  --music-dir ~/Music/Other_Collection \
+  --mixxx-db ~/backups/mixxxdb.sqlite
 ```
 
-`--music-dir` and `--mixxx-db` are both optional:
-- Omit `--music-dir` to skip the directory import step
-- Omit `--mixxx-db` to skip the Mixxx sync step
+`--music-dir` and `--mixxx-db` are optional — omit to use `[pipeline].music_dir` and `[mixxx].path` from config:
+- No `--music-dir` and no `[pipeline].music_dir` → skip directory import step
+- No `--mixxx-db` and no `[mixxx].path` → skip Mixxx sync step
 
 ## The pipeline
 
@@ -194,6 +200,9 @@ min_tracks = 3    # suppress crates with fewer tracks than this
 [energy]
 low_max  = 0.33
 high_min = 0.67
+
+[mixxx]
+path = "~/.mixxx/mixxxdb.sqlite"   # used by pipeline/sync/import when --mixxx-db is omitted
 ```
 
 ## Commands
@@ -400,6 +409,8 @@ MultiDJ owns `~/.multidj/library.sqlite`. Mixxx is a sync target, not a source.
 - `import mixxx` is a **one-time bootstrap** — after that, manage everything in MultiDJ
 - `sync mixxx --apply` is a **one-way push** — MultiDJ → Mixxx always
 - Crates created directly in Mixxx are not imported and will be overwritten on next sync
+- The `sync_state` table tracks dirty flags per-track per-adapter; an AFTER UPDATE trigger on `tracks` sets `dirty=1` automatically whenever a track row changes
+- `full_sync` only pushes tracks where `dirty=1 AND deleted=0` — incremental by design
 
 ## Project layout
 
@@ -474,6 +485,13 @@ pytest tests/test_pipeline.py -v   # single module
 | `~/.multidj/backups/` | Timestamped backups |
 | `~/.mixxx/mixxxdb.sqlite` | Mixxx DB (read on import, written on sync) |
 | `~/.cache/huggingface/hub/models--laion--larger_clap_music/` | CLAP model weights (~1.5 GB, downloaded once on first `analyze embed --apply`) |
+
+## Repository Sync Note (2026-06-03)
+
+- **`[mixxx]` config section added:** `~/.multidj/config.toml` now supports `[mixxx]` with a `path` key for the Mixxx DB location. `get_mixxx_db_path()` reads it. All Mixxx commands fall back to this when `--mixxx-db` is omitted.
+- **CLI fallback:** `pipeline`, `sync mixxx`, `import mixxx`, and `analyze mixxx-blobs` use `args.mixxx_db or get_mixxx_db_path(cfg)` — no need to pass `--mixxx-db` if `[mixxx].path` is configured.
+- **Idempotent pipeline:** All analyze steps skip already-processed tracks (WHERE field IS NULL / LEFT JOIN check). Safe to re-run daily.
+- **Source-of-truth enforced via trigger:** The `sync_state` table's AFTER UPDATE trigger on `tracks` sets `dirty=1` automatically. `full_sync` pushes only `dirty=1 AND deleted=0` tracks.
 
 ## Repository Sync Note (2026-05-27)
 
