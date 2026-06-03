@@ -1,14 +1,35 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .backup import create_backup
 from .db import connect, table_exists, ensure_not_empty
 
+# Strip common noise suffixes before comparing titles for dedup.
+# These are YouTube markers, free-download tags, remaster notes, etc.
+_SUFFIX_STRIP = re.compile(
+    r"""
+    \s*[\[\(]\s*(Official\s+(Audio|Lyric\s*Video|Music\s*Video))[\]\)]\s*$
+    |\s*[\[\(]\s*(Audio|Lyric\s*Video|Music\s*Video|Extended|Single\s*Version)[\]\)]\s*$
+    |\s*[\[\(]\s*FREE\s*(DL|D/L|DOWNLOAD|DOWLOAD)[\]\)]\s*$
+    |\s*[\[\(]\s*\d{4}\s*Remaster[\]\)]\s*$
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _norm_title(title: str) -> str:
+    """Strip common suffix noise from a title for fuzzy matching."""
+    return _SUFFIX_STRIP.sub("", title).strip()
+
 
 def _keeper_sort_key(track: dict) -> tuple:
-    """Prefer most-played, then highest-rated, then largest file."""
+    """Prefer clean titles, then most-played, highest-rated, largest file."""
+    title = track.get("title") or ""
+    has_noise = bool(_SUFFIX_STRIP.search(title))
     return (
+        has_noise,  # clean title sorts first (False < True)
         -(track["play_count"] or 0),
         -(track["rating"] or 0),
         -(track["filesize"] or 0),
@@ -52,6 +73,48 @@ def _find_groups(db_path: str | None, by: str) -> list[dict[str, Any]]:
                     groups.append({
                         "match_key": f"{na} — {nt}",
                         "match_type": "artist_title",
+                        "tracks": tracks,
+                    })
+
+        # Normalized artist-title: strip suffix noise, then group
+        if by in ("normalized-artist-title", "both"):
+            normalized_rows = conn.execute("""
+                SELECT
+                    LOWER(TRIM(COALESCE(artist, ''))) AS norm_artist,
+                    LOWER(TRIM(COALESCE(title,  ''))) AS norm_title,
+                    id, artist, title, rating, play_count, duration,
+                    path AS filepath, filesize
+                FROM tracks
+                WHERE deleted = 0
+                ORDER BY norm_artist, norm_title
+            """).fetchall()
+
+            seen_norm: dict[tuple[str, str], list[dict]] = {}
+            for row in normalized_rows:
+                na = row["norm_artist"]
+                nt = _norm_title(row["norm_title"])
+                if not na and not nt:
+                    continue
+                if (na, nt) not in seen_norm:
+                    seen_norm[(na, nt)] = []
+                seen_norm[(na, nt)].append({
+                    "track_id": row["id"],
+                    "artist": row["artist"],
+                    "title": row["title"],
+                    "rating": row["rating"],
+                    "play_count": row["play_count"],
+                    "duration": row["duration"],
+                    "filepath": row["filepath"],
+                    "filesize": row["filesize"],
+                })
+
+            for (na, nt), tracks in seen_norm.items():
+                # Only treat as duplicate if suffixes actually differed
+                raw_titles = {t["title"] for t in tracks}
+                if len(tracks) > 1 and len(raw_titles) > 1:
+                    groups.append({
+                        "match_key": f"{na} — {nt}",
+                        "match_type": "normalized_artist_title",
                         "tracks": tracks,
                     })
 

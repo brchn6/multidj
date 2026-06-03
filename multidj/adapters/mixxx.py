@@ -637,6 +637,43 @@ class MixxxAdapter(SyncAdapter):
                                 pass
                             break
 
+                # ── sync deleted tracks: mark as mixxx_deleted=1 in Mixxx ──
+                deleted_rows = mdj_conn.execute(
+                    """
+                    SELECT t.path FROM tracks t
+                    JOIN sync_state ss ON t.id = ss.track_id
+                    WHERE ss.adapter='mixxx' AND t.deleted=1
+                    """
+                ).fetchall()
+                deleted_in_mixxx = 0
+                for row in deleted_rows:
+                    path = row["path"] if isinstance(row, sqlite3.Row) else row[0]
+                    mixxx_conn.execute(
+                        """
+                        UPDATE library SET mixxx_deleted=1
+                        WHERE id=(
+                            SELECT l.id FROM library l
+                            JOIN track_locations tl ON l.location = tl.id
+                            WHERE tl.location = ?
+                        )
+                        """,
+                        (path,),
+                    )
+                    if mixxx_conn.execute(
+                        "SELECT changes()"
+                    ).fetchone()[0] > 0:
+                        deleted_in_mixxx += 1
+                        mdj_conn.execute(
+                            """
+                            UPDATE sync_state SET dirty=0, last_synced_at=?
+                            WHERE track_id=(SELECT id FROM tracks WHERE path=?) AND adapter='mixxx'
+                            """,
+                            (now_iso, path),
+                        )
+                if deleted_in_mixxx:
+                    mixxx_conn.commit()
+                    mdj_conn.commit()
+
                 crate_result = _push_crates_to_mixxx(mdj_conn, mixxx_conn)
                 # Reconcile cue hot cue slots 0/1/2 — MultiDJ is source of truth
                 mixxx_conn.execute("DELETE FROM cues WHERE hotcue IN (0, 1, 2)")
@@ -651,6 +688,7 @@ class MixxxAdapter(SyncAdapter):
             "pushed":             pushed,
             "cover_art_linked": cover_art_linked,
             "errors":             errors,
+            "deleted_in_mixxx":    deleted_in_mixxx,
             "crates_created":      crate_result["crates_created"],
             "crate_tracks_pushed": crate_result["tracks_pushed"],
             "cues_pushed":         cue_result.get("pushed", 0),
