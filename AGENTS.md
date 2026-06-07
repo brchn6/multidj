@@ -101,6 +101,7 @@ Agent operating guide for this repository.
 
 - **`multidj import directory` now defaults to `music_dir` from config:** When no PATH argument is given, `import directory` falls back to the configured `music_dir` from `~/.multidj/config.toml`. Also removed stale local import that caused `UnboundLocalError` in `sync mixxx`.
 - **Album auto-fill from parent directory:** During `import directory`, if a file has no embedded album tag (`album` is NULL/empty), the parent directory name is used as the album value. Album is also included in the `changed` detection so future re-imports pick up directory renames. One-time backfill SQL (`UPDATE tracks SET album = parent_dir WHERE album IS NULL`) brought 1,613 tracks up to date; direct Mixxx UPDATE backfilled 3,238 album values.
+- **Auto-dedup on import:** `import directory --apply` now automatically deduplicates tracks by artist+title after scanning. Keeps the best copy (most played → highest rated → largest file), soft-deletes the rest. Pipeline step 5 also runs dedup. One-time `multidj dedupe --apply` removed 468 duplicate tracks.
 
 ## Repository Sync Note (2026-05-27)
 
