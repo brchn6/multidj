@@ -113,8 +113,10 @@ class DirectoryAdapter(SyncAdapter):
                         tags["title"] = mismatch["suggested_title"]
                         auto_swapped_artist_title += 1
 
+                    album = tags.get("album") or Path(filepath).parent.name
+
                     existing = conn.execute(
-                        "SELECT id, artist, title, genre, bpm FROM tracks WHERE path = ?",
+                        "SELECT id, artist, title, album, genre, bpm FROM tracks WHERE path = ?",
                         (filepath,),
                     ).fetchone()
 
@@ -129,7 +131,7 @@ class DirectoryAdapter(SyncAdapter):
                                 filepath,
                                 tags.get("artist"),
                                 tags.get("title"),
-                                tags.get("album"),
+                                album,
                                 tags.get("genre"),
                                 tags.get("bpm"),
                                 tags.get("duration"),
@@ -142,6 +144,7 @@ class DirectoryAdapter(SyncAdapter):
                         changed = (
                             existing["artist"] != tags.get("artist")
                             or existing["title"] != tags.get("title")
+                            or existing["album"] != album
                             or existing["genre"] != tags.get("genre")
                             or existing["bpm"] != tags.get("bpm")
                         )
@@ -156,7 +159,7 @@ class DirectoryAdapter(SyncAdapter):
                                 (
                                     tags.get("artist"),
                                     tags.get("title"),
-                                    tags.get("album"),
+                                    album,
                                     tags.get("genre"),
                                     tags.get("bpm"),
                                     tags.get("duration"),
