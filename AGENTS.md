@@ -97,6 +97,11 @@ Agent operating guide for this repository.
 - **Pipeline idempotency documented:** All analyze steps skip already-processed tracks (WHERE field IS NULL / LEFT JOIN check). Safe to re-run pipeline daily.
 - **Source-of-truth clarified via `sync_state` trigger:** AFTER UPDATE trigger on `tracks` sets `dirty=1`; `full_sync` only pushes `dirty=1 AND deleted=0` tracks.
 
+## Repository Sync Note (2026-06-08)
+
+- **`multidj import directory` now defaults to `music_dir` from config:** When no PATH argument is given, `import directory` falls back to the configured `music_dir` from `~/.multidj/config.toml`. Also removed stale local import that caused `UnboundLocalError` in `sync mixxx`.
+- **Album auto-fill from parent directory:** During `import directory`, if a file has no embedded album tag (`album` is NULL/empty), the parent directory name is used as the album value. Album is also included in the `changed` detection so future re-imports pick up directory renames. One-time backfill SQL (`UPDATE tracks SET album = parent_dir WHERE album IS NULL`) brought 1,613 tracks up to date; direct Mixxx UPDATE backfilled 3,238 album values.
+
 ## Repository Sync Note (2026-05-27)
 
 - Phase 12 (semantic embeddings): `multidj/embed.py` added. `multidj analyze embed --apply [--force] [--limit N]`. CLAP model `laion/larger_clap_music`, 512-dim BLOB storage in new `embeddings` table (migration 004). Requires `uv sync --extra embeddings`.
