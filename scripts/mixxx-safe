@@ -1,0 +1,41 @@
+#!/bin/bash
+set -e
+
+# ── Safe Mixxx launcher ─────────────────────────────────────────────────
+# Stops Dropbox first, runs Mixxx with local DB, then on exit backs up
+# the DB to Dropbox and restarts Dropbox.
+#
+# This avoids SQLite readonly errors caused by Dropbox locking the shared DB.
+# ─────────────────────────────────────────────────────────────────────────
+
+MIXXX_BIN="${MIXXX_BIN:-mixxx}"
+LOCAL_DB="$HOME/.mixxx/mixxxdb.sqlite"
+DROPBOX_DB="$HOME/Weizmann Institute Dropbox/Bar Cohen/Music/.mixxx/mixxxdb.sqlite"
+DROPBOX_BACKUP="$HOME/.multidj/backups/mixxxdb_$(date +%Y%m%d_%H%M%S).sqlite"
+
+# Ensure local DB exists
+if [ ! -f "$LOCAL_DB" ]; then
+    echo "Local DB not found at $LOCAL_DB"
+    echo "Run: cp \"$DROPBOX_DB\" \"$LOCAL_DB\""
+    exit 1
+fi
+
+cleanup() {
+    echo ""
+    echo "Backing up DB to Dropbox..."
+    sqlite3 "$LOCAL_DB" ".backup '$DROPBOX_DB'"
+    echo "Backup complete."
+
+    echo "Restarting Dropbox..."
+    dropbox start >/dev/null 2>&1 || true
+    echo "Dropbox restarted."
+}
+
+trap cleanup EXIT INT TERM
+
+echo "Stopping Dropbox..."
+dropbox stop >/dev/null 2>&1 || true
+
+echo "Starting Mixxx (local DB)..."
+"$MIXXX_BIN" "$@"
+echo "Mixxx exited."
