@@ -232,6 +232,7 @@ def analyze_mixxx_blobs(
     apply: bool = False,
     force: bool = False,
     lock_bpm: bool = False,
+    write_beats: bool = False,
     limit: int | None = None,
     backup_dir: str | None = None,
 ) -> dict[str, Any]:
@@ -347,10 +348,15 @@ def analyze_mixxx_blobs(
             chromatic_key = 0
             key_text = ""
 
-            # BeatGrid BLOB — skip if Mixxx already has one, unless --force
-            if bpm and bpm > 0 and (force or not has_beats):
+            # BeatGrid BLOB — only when write_beats=True and bpm present
+            if bpm and bpm > 0 and write_beats and (force or not has_beats):
                 beat_blob = pack_beatgrid(float(bpm))
                 wrote_beat = True
+
+            # BPM sync + lock — always apply when bpm present, even without blob
+            bpm_sync = bpm is not None and float(bpm) > 0
+            bpm_needs_lock = bpm_sync and lock_bpm
+            bpm_needs_update = bpm_sync and (force or not has_beats)
 
             # KeyMap BLOB — skip if Mixxx already has one, unless --force
             if key_str and key_str.strip() and (force or not has_keys):
@@ -361,7 +367,7 @@ def analyze_mixxx_blobs(
                     key_text = key_str.strip()
                     key_blob = pack_keymap(chromatic_key, key_text)
 
-            if not (wrote_beat or key_blob):
+            if not (wrote_beat or key_blob or bpm_needs_update):
                 continue
 
             detail: dict[str, Any] = {
@@ -377,22 +383,22 @@ def analyze_mixxx_blobs(
             if apply:
                 try:
                     if wrote_beat and beat_blob is not None:
-                        if lock_bpm:
-                            mixxx_conn.execute(
-                                """UPDATE library SET
-                                   beats = ?, beats_version = ?, beats_sub_version = NULL,
-                                   bpm = ?, bpm_lock = 1
-                                   WHERE id = ?""",
-                                (beat_blob, BEATGRID_VERSION, bpm, lib_id),
-                            )
-                        else:
-                            mixxx_conn.execute(
-                                """UPDATE library SET
-                                   beats = ?, beats_version = ?, beats_sub_version = NULL,
-                                   bpm = ?
-                                   WHERE id = ?""",
-                                (beat_blob, BEATGRID_VERSION, bpm, lib_id),
-                            )
+                        mixxx_conn.execute(
+                            """UPDATE library SET
+                               beats = ?, beats_version = ?, beats_sub_version = NULL,
+                               bpm = ?, bpm_lock = ?
+                               WHERE id = ?""",
+                            (beat_blob, BEATGRID_VERSION, bpm, 1 if lock_bpm else 0, lib_id),
+                        )
+                        beat_written += 1
+                    elif bpm_needs_update:
+                        # Sync BPM + lock without writing BeatGrid blob
+                        mixxx_conn.execute(
+                            """UPDATE library SET
+                               bpm = ?, bpm_lock = ?
+                               WHERE id = ?""",
+                            (bpm, 1 if bpm_needs_lock else 0, lib_id),
+                        )
                         beat_written += 1
 
                     if key_blob:

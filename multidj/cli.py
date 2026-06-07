@@ -244,6 +244,8 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="Overwrite existing Mixxx analysis (default: skip tracks that already have BeatGrid/KeyMap)")
     p_mixxx_blobs.add_argument("--lock-bpm", action="store_true", dest="lock_bpm",
                                 help="Set bpm_lock=1 so Mixxx never re-analyzes BPM")
+    p_mixxx_blobs.add_argument("--write-beats", action="store_true", dest="write_beats",
+                                help="Also write BeatGrid BLOBs (opt-in; may cause deserialization failures on some Mixxx versions)")
     p_mixxx_blobs.add_argument("--limit",    type=int, default=None)
     p_mixxx_blobs.add_argument("--no-backup", action="store_true", dest="no_backup")
 
@@ -520,6 +522,7 @@ def main(argv: list[str] | None = None) -> int:
                 apply=args.apply,
                 force=args.force,
                 lock_bpm=args.lock_bpm,
+                write_beats=args.write_beats,
                 limit=args.limit,
                 backup_dir=False if args.no_backup else None,
             )
@@ -627,7 +630,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             # If the Mixxx DB is not the default local path (e.g. it's in Dropbox),
             # also sync it to the default local path so mixxx-safe picks it up.
-            if apply and result.get("pushed", 0) > 0:
+            if args.apply and result.get("pushed", 0) > 0:
                 local_mixxx = str(Path("~/.mixxx/mixxxdb.sqlite").expanduser())
                 dropbox_mixxx = str(Path(mixxx_db).expanduser())
                 if dropbox_mixxx != local_mixxx and Path(local_mixxx).parent.exists():
