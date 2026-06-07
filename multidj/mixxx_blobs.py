@@ -380,7 +380,7 @@ def analyze_mixxx_blobs(
                         if lock_bpm:
                             mixxx_conn.execute(
                                 """UPDATE library SET
-                                   beats = ?, beats_version = ?,
+                                   beats = ?, beats_version = ?, beats_sub_version = NULL,
                                    bpm = ?, bpm_lock = 1
                                    WHERE id = ?""",
                                 (beat_blob, BEATGRID_VERSION, bpm, lib_id),
@@ -388,7 +388,7 @@ def analyze_mixxx_blobs(
                         else:
                             mixxx_conn.execute(
                                 """UPDATE library SET
-                                   beats = ?, beats_version = ?,
+                                   beats = ?, beats_version = ?, beats_sub_version = NULL,
                                    bpm = ?
                                    WHERE id = ?""",
                                 (beat_blob, BEATGRID_VERSION, bpm, lib_id),
@@ -398,7 +398,7 @@ def analyze_mixxx_blobs(
                     if key_blob:
                         mixxx_conn.execute(
                             """UPDATE library SET
-                               keys = ?, keys_version = ?,
+                               keys = ?, keys_version = ?, keys_sub_version = NULL,
                                key_id = ?, key = ?
                                WHERE id = ?""",
                             (
