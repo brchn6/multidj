@@ -319,8 +319,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-backup", action="store_true", help="Skip backup before import")
 
     p_dir = import_sub.add_parser("directory", help="Import tracks from filesystem directories")
-    p_dir.add_argument("paths", nargs="+", metavar="PATH",
-                       help="Directories to scan recursively")
+    p_dir.add_argument("paths", nargs="*", metavar="PATH",
+                       help="Directories to scan (default: music_dir from config)")
     p_dir.add_argument("--apply",     action="store_true")
     p_dir.add_argument("--no-backup", action="store_true", dest="no_backup")
 
@@ -599,11 +599,21 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.import_target == "directory":
             from .adapters.directory import DirectoryAdapter
+            from .config import load_config, get_music_dir
+            paths = list(args.paths)
+            if not paths:
+                cfg = load_config()
+                music_dir = get_music_dir(cfg)
+                if music_dir:
+                    paths = [music_dir]
+                else:
+                    emit("No paths given and no music_dir configured. Run 'multidj config set-music-dir <path>' first.", err=True)
+                    sys.exit(1)
             adapter = DirectoryAdapter()
             result = adapter.import_all(
                 multidj_db_path=resolve_db_path(args.db),
                 apply=args.apply,
-                paths=args.paths,
+                paths=paths,
                 backup_dir=False if args.no_backup else None,
             )
 
