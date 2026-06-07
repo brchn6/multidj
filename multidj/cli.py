@@ -625,6 +625,22 @@ def main(argv: list[str] | None = None) -> int:
                 multidj_db_path=resolve_db_path(args.db),
                 apply=args.apply,
             )
+            # If the Mixxx DB is not the default local path (e.g. it's in Dropbox),
+            # also sync it to the default local path so mixxx-safe picks it up.
+            if apply and result.get("pushed", 0) > 0:
+                local_mixxx = str(Path("~/.mixxx/mixxxdb.sqlite").expanduser())
+                dropbox_mixxx = str(Path(mixxx_db).expanduser())
+                if dropbox_mixxx != local_mixxx and Path(local_mixxx).parent.exists():
+                    import sqlite3 as _sqlite3
+                    try:
+                        _src = _sqlite3.connect(dropbox_mixxx)
+                        _dst_path = local_mixxx + ".backup"
+                        _src.backup(_sqlite3.connect(_dst_path))
+                        _src.close()
+                        import shutil as _shutil
+                        _shutil.move(_dst_path, local_mixxx)
+                    except Exception:
+                        pass  # best-effort
 
     elif args.command == "pipeline":
         cfg = load_config()
