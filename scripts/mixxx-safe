@@ -1,9 +1,10 @@
 #!/bin/bash
 set -e
 
-# ── Safe Mixxx launcher ─────────────────────────────────────────────────
-# Stops Dropbox first, runs Mixxx with local DB, then on exit backs up
-# the DB to Dropbox and restarts Dropbox.
+# ── Safe Mixxx launcher / DB sync ──────────────────────────────────────
+# Commands:
+#   mixxx-safe           — stop Dropbox, run Mixxx, backup DB on exit
+#   mixxx-safe --backup  — just backup local DB to Dropbox (no Mixxx)
 #
 # This avoids SQLite readonly errors caused by Dropbox locking the shared DB.
 # ─────────────────────────────────────────────────────────────────────────
@@ -11,27 +12,34 @@ set -e
 MIXXX_BIN="${MIXXX_BIN:-mixxx}"
 LOCAL_DB="$HOME/.mixxx/mixxxdb.sqlite"
 DROPBOX_DB="$HOME/Weizmann Institute Dropbox/Bar Cohen/Music/.mixxx/mixxxdb.sqlite"
-DROPBOX_BACKUP="$HOME/.multidj/backups/mixxxdb_$(date +%Y%m%d_%H%M%S).sqlite"
+
+backup_to_dropbox() {
+    if [ ! -f "$LOCAL_DB" ]; then
+        echo "Local DB not found at $LOCAL_DB"
+        return 1
+    fi
+    local backup_dir="$HOME/.multidj/backups"
+    mkdir -p "$backup_dir"
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    sqlite3 "$LOCAL_DB" ".backup '$backup_dir/mixxxdb_$timestamp.sqlite'"
+    sqlite3 "$LOCAL_DB" ".backup '$DROPBOX_DB'"
+    echo "DB backed up to Dropbox"
+}
+
+if [ "${1:-}" = "--backup" ]; then
+    backup_to_dropbox
+    exit 0
+fi
 
 # Ensure local DB exists
 if [ ! -f "$LOCAL_DB" ]; then
     echo "Local DB not found at $LOCAL_DB"
-    echo "Run: cp \"$DROPBOX_DB\" \"$LOCAL_DB\""
+    echo "Run: mixxx-safe --init"
     exit 1
 fi
 
-cleanup() {
-    echo ""
-    echo "Backing up DB to Dropbox..."
-    sqlite3 "$LOCAL_DB" ".backup '$DROPBOX_DB'"
-    echo "Backup complete."
-
-    echo "Restarting Dropbox..."
-    dropbox start >/dev/null 2>&1 || true
-    echo "Dropbox restarted."
-}
-
-trap cleanup EXIT INT TERM
+trap 'backup_to_dropbox; dropbox start >/dev/null 2>&1 || true' EXIT INT TERM
 
 echo "Stopping Dropbox..."
 dropbox stop >/dev/null 2>&1 || true
