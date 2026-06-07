@@ -204,6 +204,16 @@ class DirectoryAdapter(SyncAdapter):
             # Single commit for all successful writes
             conn.commit()
 
+            # Auto-deduplicate tracks with identical artist+title
+            from ..dedupe import dedupe as _dedupe
+            dedup_result = _dedupe(
+                db_path=str(multidj_db_path),
+                by="artist-title",
+                apply=True,
+                backup=False,
+            )
+            removed_dup = dedup_result.get("total_removed", 0)
+
         return {
             "mode":             "apply",
             "total_found":      len(audio_files),
@@ -212,6 +222,7 @@ class DirectoryAdapter(SyncAdapter):
             "unchanged_tracks": unchanged_tracks,
             "auto_swapped_artist_title": auto_swapped_artist_title,
             "removed_tracks":   removed_tracks,
+            "dedup_removed":    removed_dup,
             "errors":           errors,
         }
 
