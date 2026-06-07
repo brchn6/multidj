@@ -599,7 +599,6 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.import_target == "directory":
             from .adapters.directory import DirectoryAdapter
-            from .config import load_config, get_music_dir
             paths = list(args.paths)
             if not paths:
                 cfg = load_config()
