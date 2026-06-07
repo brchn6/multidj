@@ -62,10 +62,8 @@ def _encode_submsg(field_number: int, inner: bytes) -> bytes:
 # ── Version strings (must match installed Mixxx) ──────────────────────────────
 
 BEATGRID_VERSION = "BeatGrid-2.0"
-BEATGRID_SUB_VERSION = "rounding=V4|vamp_plugin_id=qm-tempotracker:0"
 
 KEYMAP_VERSION = "KeyMap-1.0"
-KEYMAP_SUB_VERSION = "vamp_plugin_id=qm-keydetector:2"
 
 # ── ChromaticKey enum mapping ────────────────────────────────────────────────
 
@@ -382,31 +380,30 @@ def analyze_mixxx_blobs(
                         if lock_bpm:
                             mixxx_conn.execute(
                                 """UPDATE library SET
-                                   beats = ?, beats_version = ?, beats_sub_version = ?,
+                                   beats = ?, beats_version = ?,
                                    bpm = ?, bpm_lock = 1
                                    WHERE id = ?""",
-                                (beat_blob, BEATGRID_VERSION, BEATGRID_SUB_VERSION, bpm, lib_id),
+                                (beat_blob, BEATGRID_VERSION, bpm, lib_id),
                             )
                         else:
                             mixxx_conn.execute(
                                 """UPDATE library SET
-                                   beats = ?, beats_version = ?, beats_sub_version = ?,
+                                   beats = ?, beats_version = ?,
                                    bpm = ?
                                    WHERE id = ?""",
-                                (beat_blob, BEATGRID_VERSION, BEATGRID_SUB_VERSION, bpm, lib_id),
+                                (beat_blob, BEATGRID_VERSION, bpm, lib_id),
                             )
                         beat_written += 1
 
                     if key_blob:
                         mixxx_conn.execute(
                             """UPDATE library SET
-                               keys = ?, keys_version = ?, keys_sub_version = ?,
+                               keys = ?, keys_version = ?,
                                key_id = ?, key = ?
                                WHERE id = ?""",
                             (
                                 key_blob,
                                 KEYMAP_VERSION,
-                                KEYMAP_SUB_VERSION,
                                 chromatic_key,
                                 key_text,
                                 lib_id,
