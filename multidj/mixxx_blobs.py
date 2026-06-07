@@ -129,39 +129,21 @@ def chromatic_to_key_text(chromatic_key: int) -> str:
 
 
 def pack_beatgrid(bpm: float, first_beat_frame: int = 0) -> bytes:
-    """Pack a BeatGrid-2.0 protobuf BLOB.
+    """Pack a BeatGrid BLOB using legacy struct format.
+
+    Mixxx's Beats::fromBeatGridByteArray() first tries protobuf parse,
+    then falls back to legacy BeatGridV1Data struct (2 doubles = 16 bytes).
+    The legacy format is always accepted and avoids proto version issues.
 
     Args:
         bpm: BPM value (double).
-        first_beat_frame: Frame position of the first downbeat (int32).
+        first_beat_frame: Frame position of the first downbeat.
                           Default 0 means "first downbeat at sample 0".
 
     Returns:
-        Raw protobuf bytes (14-16 bytes) for the BeatGrid message.
-
-    Proto schema (mixxx.track.io.BeatGrid):
-        message Bpm        { optional double bpm = 1; }
-        message Beat       { optional int32 frame_position = 1; }
-        message BeatGrid   { optional Bpm bpm = 1; optional Beat first_beat = 2; }
-
-    Field 2 (Source) defaults to ANALYZER=0 and is omitted in serialization.
+        Exactly 16 bytes representing {double bpm, double firstBeat}.
     """
-    # Bpm sub-message (field 1: double bpm)
-    bpm_value = struct.pack("<d", bpm)  # 8 bytes
-    bpm_msg = b"\x09" + bpm_value  # tag (1<<3)|1=0x09 + value (9 bytes total)
-
-    # Beat sub-message (field 1: int32 frame_position)
-    beat_fp_tag = b"\x08"  # tag (1<<3)|0=0x08
-    beat_fp_value = varint_encode(first_beat_frame)
-    beat_msg = beat_fp_tag + beat_fp_value
-
-    # BeatGrid message
-    tag_bpm = b"\x0a"  # field 1, wire type 2: (1<<3)|2 = 0x0a
-    len_bpm = varint_encode(len(bpm_msg))
-    tag_beat = b"\x12"  # field 2, wire type 2: (2<<3)|2 = 0x12
-    len_beat = varint_encode(len(beat_msg))
-
-    return tag_bpm + len_bpm + bpm_msg + tag_beat + len_beat + beat_msg
+    return struct.pack("<dd", bpm, float(first_beat_frame))
 
 
 def pack_keymap(
@@ -232,7 +214,7 @@ def analyze_mixxx_blobs(
     apply: bool = False,
     force: bool = False,
     lock_bpm: bool = False,
-    write_beats: bool = False,
+    write_beats: bool = True,
     limit: int | None = None,
     backup_dir: str | None = None,
 ) -> dict[str, Any]:

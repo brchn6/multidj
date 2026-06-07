@@ -147,7 +147,7 @@ def run_pipeline(
             multidj_db_path=db_path, mixxx_db_path=mixxx_db_path,
             apply=apply, backup_dir=False,
             limit=limit,
-            write_beats=False,
+            write_beats=True,
         ))
     else:
         steps.append({
