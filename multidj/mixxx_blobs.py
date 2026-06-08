@@ -129,11 +129,18 @@ def chromatic_to_key_text(chromatic_key: int) -> str:
 
 
 def pack_beatgrid(bpm: float, first_beat_frame: int = 0) -> bytes:
-    """Pack a BeatGrid BLOB using legacy struct format.
+    """Pack a valid BeatGrid-2.0 protobuf BLOB.
 
-    Mixxx's Beats::fromBeatGridByteArray() first tries protobuf parse,
-    then falls back to legacy BeatGridV1Data struct (2 doubles = 16 bytes).
-    The legacy format is always accepted and avoids proto version issues.
+    Schema (mixxx.track.io.BeatGrid, proto2 LITE_RUNTIME):
+        message BeatGrid {
+            optional Bpm bpm = 1;
+            optional Beat first_beat = 2;
+        }
+        message Bpm   { optional double bpm = 1; }
+        message Beat  { optional int32 frame_position = 1; }
+
+    All optional fields with default values (enabled=true, source=ANALYZER=0)
+    are omitted to produce the minimal valid message.
 
     Args:
         bpm: BPM value (double).
@@ -141,9 +148,19 @@ def pack_beatgrid(bpm: float, first_beat_frame: int = 0) -> bytes:
                           Default 0 means "first downbeat at sample 0".
 
     Returns:
-        Exactly 16 bytes representing {double bpm, double firstBeat}.
+        Valid protobuf bytes (typically 15 bytes for first_beat=0).
     """
-    return struct.pack("<dd", bpm, float(first_beat_frame))
+    # Inner Bpm: double bpm = 1, wire type 1 (fixed64)
+    inner_bpm = _encode_double(1, bpm)
+    # Outer: BeatGrid.bpm = 1, wire type 2 (length-delimited sub-message)
+    bpm_msg = _encode_submsg(1, inner_bpm)
+
+    # Inner Beat: int32 frame_position = 1, wire type 0 (varint)
+    inner_beat = _encode_varint(1, first_beat_frame)
+    # Outer: BeatGrid.first_beat = 2, wire type 2 (length-delimited sub-message)
+    beat_msg = _encode_submsg(2, inner_beat)
+
+    return bpm_msg + beat_msg
 
 
 def pack_keymap(
