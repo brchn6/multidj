@@ -327,6 +327,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_dir.add_argument("--apply",     action="store_true")
     p_dir.add_argument("--no-backup", action="store_true", dest="no_backup")
 
+    p_mxa = import_sub.add_parser(
+        "mixxx-analysis",
+        help="Import Mixxx analysis results (BPM, key) into MultiDJ tracks",
+    )
+    p_mxa.add_argument("--mixxx-db", help="Path to Mixxx DB (default: ~/.mixxx/mixxxdb.sqlite)")
+    p_mxa.add_argument("--apply", action="store_true",
+                        help="Write to MultiDJ DB (default: dry-run)")
+    p_mxa.add_argument("--force", action="store_true",
+                        help="Overwrite existing BPM/key values in MultiDJ")
+    p_mxa.add_argument("--limit", type=int, default=None,
+                        help="Cap number of tracks to process")
+    p_mxa.add_argument("--no-backup", action="store_true", dest="no_backup")
+
     # ── sync ─────────────────────────────────────────────────────────────────
     sync_p = sub.add_parser("sync", help="Push dirty tracks to DJ software")
     sync_sub = sync_p.add_subparsers(dest="sync_target", required=True)
@@ -617,6 +630,18 @@ def main(argv: list[str] | None = None) -> int:
                 multidj_db_path=resolve_db_path(args.db),
                 apply=args.apply,
                 paths=paths,
+                backup_dir=False if args.no_backup else None,
+            )
+        elif args.import_target == "mixxx-analysis":
+            cfg = load_config()
+            mixxx_db = args.mixxx_db or get_mixxx_db_path(cfg)
+            from .import_mixxx_analysis import import_mixxx_analysis
+            result = import_mixxx_analysis(
+                multidj_db_path=args.db,
+                mixxx_db_path=mixxx_db,
+                apply=args.apply,
+                force=args.force,
+                limit=args.limit,
                 backup_dir=False if args.no_backup else None,
             )
 
