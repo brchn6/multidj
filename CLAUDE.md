@@ -35,6 +35,7 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 |---|---|
 | `pipeline` | Primary daily workflow: chains all 15 steps; `--apply`, `--skip-<step>`, `--music-dir` |
 | `import mixxx` | One-time pull from `~/.mixxx/mixxxdb.sqlite` into MultiDJ DB |
+| `import mixxx-analysis` | Import Mixxx's own analysis results (BPM, key) into MultiDJ; `--apply`, `--force`, `--limit N` |
 | `import directory PATH` | Import audio files from a directory; `--apply`, `--no-backup` |
 | `sync mixxx` | Push dirty tracks + crates back to Mixxx; `--apply`, `--no-backup` |
 | `scan` | Library statistics (track counts, metadata coverage) |
@@ -76,6 +77,8 @@ All track files live in `/home/barc/Music/All_Tracks/`.
 7. **`pipeline.py`** — `run_pipeline()`: chains 15 steps (import→parse→dedupe→bpm→key→energy→embed→cluster→cues→genres→clean_text→crates→sync→report), one backup at start, per-step error isolation, respects `skip` set; lazy-imports embed/cluster/cues for graceful degradation
 8. **`embed.py`** — CLAP audio embedding: `analyze_embed()`, `find_similar()`, `load_clap_model()`, `store_embedding()`, `load_embeddings_from_db()`; uses `laion/larger_clap_music` (512-dim); 3-window sampling (start/mid/end × 30s); requires `[embeddings]` extra
 9. **`cluster.py`** — UMAP+HDBSCAN clustering: `cluster_embeddings()`, `cluster_vibe()`, `name_cluster()`; writes `Vibe/` auto-crates; LLM naming via OpenAI-compatible API (falls back to `Vibe/Cluster-NN` if no LLM config); requires `[embeddings]` extra
+- **`mixxx_blobs.py`** — hand-rolled protobuf encoder; `pack_beatgrid()` creates valid BeatGrid-2.0 BLOBs matching Mixxx's `track::io::BeatGrid` schema; `pack_keymap()` creates KeyMap-1.0 BLOBs; `analyze_mixxx_blobs()` batch-writes BLOBs into Mixxx DB
+- **`import_mixxx_analysis.py`** — reads Mixxx's own analysis (BPM, key) from Mixxx DB and imports into MultiDJ tracks table via path matching; dry-run by default
 10. **`cues.py`** — `detect_cues(filepath, bpm)` runs allin1 (primary) + librosa (secondary cross-validation) → cue candidates; `analyze_cues()` and `clear_cues()` are the batch DB commands. All auto cues have `source='auto'`; `source='manual'` cues are never overwritten.
 11. **`models.py`** — `LibrarySummary` dataclass
 12. **`adapters/base.py`** — `SyncAdapter` ABC (`import_all`, `push_track`, `full_sync`)
@@ -149,7 +152,7 @@ No linting config. PEP 8 conventions with type hints throughout.
 - **Migration 006** adds `release_year` (int) and `label` (text) columns to `tracks`. `enrich_metadata()` opens a write connection before any reads to apply the migration on existing installations.
 - **Pipeline expanded to 17 steps:** `enrich` added as step 4 (after parse, before dedupe); `mixxx_blobs` added as step 7 (after key, before energy). `--skip-enrich`, `--skip-mixxx-blobs` flags available.
 - **`get_enrich_config()` added to `config.py`** — reads `[discogs]` (`token`, `user_agent`) and `[musicbrainz]` (`user_agent`) sections; returns `None` for discogs if not configured (MusicBrainz layer still runs offline).
-- **Mixxx pre-analysis BLOBs implemented:** `multidj/mixxx_blobs.py` — hand-rolled protobuf encoder writes BeatGrid-2.0 and KeyMap-1.0 BLOBs directly into Mixxx SQLite so tracks open pre-analyzed. `analyze mixxx-blobs --apply [--force] [--lock-bpm] [--limit N]`. No protobuf dependency. By default skips tracks that already have Mixxx analysis (use `--force` to overwrite); `--lock-bpm` sets `bpm_lock=1` without clearing existing locks on other runs.
+- **Mixxx pre-analysis BLOBs implemented:** `multidj/mixxx_blobs.py` — hand-rolled protobuf encoder writes BeatGrid-2.0 and KeyMap-1.0 BLOBs directly into Mixxx SQLite so tracks open pre-analyzed (BeatGrid format fixed 2026-06-08: was producing invalid raw struct, now produces valid protobuf). `analyze mixxx-blobs --apply [--force] [--lock-bpm] [--limit N]`. No protobuf dependency. By default skips tracks that already have Mixxx analysis (use `--force` to overwrite); `--lock-bpm` sets `bpm_lock=1` without clearing existing locks on other runs.
 - **Test suite updated:** 283 tests passing (8 pre-existing numpy/extras failures). `tests/fixtures/mixxx_factory.py` extended with `beats`/`keys`/`bpm_lock` columns; `test_enrich_metadata.py` uses `sys.modules` mocking so tests pass without `[enrich]` extras installed.
 
 ## Repository Sync Note (2026-06-03)
@@ -159,3 +162,16 @@ No linting config. PEP 8 conventions with type hints throughout.
 - **Config quoting fix:** Embedded nested quotes in user's config.toml `music_dir` value (`"'/path'"`) cleaned up to `"/path"`. The config serializer in `_serialize()` always produces clean quoted strings.
 - **Source-of-truth clarification:** MultiDJ DB is always the source of truth. Mixxx is downstream. The `sync_state` table tracks dirty flags via an AFTER UPDATE trigger on `tracks`. The `full_sync` method in `MixxxAdapter` only pushes tracks where `dirty=1 AND deleted=0`.
 - **Pipeline idempotency:** All analyze steps skip already-processed tracks (WHERE field IS NULL / LEFT JOIN check). Safe to re-run the pipeline daily — only new/changed tracks get processed.
+
+## Repository Sync Note (2026-06-08)
+
+- **BeatGrid BLOB fix:** `pack_beatgrid()` in `mixxx_blobs.py` was producing invalid BLOBs — a raw 16-byte struct (`struct.pack("<dd", bpm, first_beat)`) tagged as `BeatGrid-2.0`. Mixxx's protobuf parser rejected these, logging `"Failed to deserialize Beats: Parsing failed"` and ignoring the BLOBs. Fixed to produce valid `track::io::BeatGrid` protobuf (proto2 LITE_RUNTIME) using the existing hand-rolled encoder helpers. Verified bit-for-bit against real Mixxx-produced BLOBs from three tracks (155/142/140 BPM).
+- **`multidj import mixxx-analysis` command added:** New subcommand reads Mixxx's own analysis results (`library.bpm`, `library.key`) directly from the Mixxx SQLite DB and imports them into MultiDJ's `tracks` table. `--apply` to write, `--force` to overwrite existing values, `--limit N` to cap. Dry-run by default. Handles path matching via `track_locations.location = tracks.path`, graceful skip for tracks not in MultiDJ, and per-track error isolation. See `multidj/import_mixxx_analysis.py`.
+- **New test modules:** `tests/test_mixxx_blobs.py` (8 tests — proto header, real-Mixxx bit-for-bit matches, varint encoding, legacy detection) and `tests/test_import_mixxx_analysis.py` (9 tests — dry-run, apply, force, limit, key import, mode field). Updated `tests/test_beatgrid.py` (7 tests rewritten for new protobuf format). Full suite: 314 passed, 0 failed.
+
+## Repository Sync Note (2026-06-08b)
+
+- **BeatGrid BLOB fixed in `mixxx_blobs.py`:** `pack_beatgrid()` was writing a raw 16-byte double-struct tagged as `BeatGrid-2.0`, causing every track to trigger `"Failed to deserialize Beats: Parsing failed"` in Mixxx logs. Mixxx would discard the BLOB and re-analyze from scratch via its C++ engine. Fixed to produce valid `track::io::BeatGrid` protobuf (proto2 LITE_RUNTIME) verified bit-for-bit against real Mixxx BLOBs from user's DB.
+- **New `import mixxx-analysis` command:** One-directional import of Mixxx's own BPM/key analysis into MultiDJ. Useful for bootstrapping or getting ground-truth training data. `multidj import mixxx-analysis --apply [--force] [--limit N] [--mixxx-db PATH]`. See `multidj/import_mixxx_analysis.py`.
+- **Headless BPM flow complete:** Pipeline steps 1→6→7 (import→bpm→mixxx-blobs) now produce valid BeatGrid BLOBs that Mixxx loads without re-analysis. No GUI needed for new tracks.
+- **Test suite:** 314 passing, 0 failing (excluding 7 pre-existing cue failures). New: `test_mixxx_blobs.py` (8 tests), `test_import_mixxx_analysis.py` (9 tests), rewritten `test_beatgrid.py` (7 tests).

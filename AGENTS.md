@@ -33,7 +33,7 @@ Agent operating guide for this repository.
   - `uv sync --extra embeddings` — adds torch, transformers, librosa, umap-learn, hdbscan, openai (CLAP embeddings + clustering)
 - Main CLI entrypoint: `multidj` (legacy alias: `mixxx-tool`)
 - Run tests:
-  - `.venv/bin/pytest tests/ -v` — 232 passing (7 pre-existing failures in test_analyze_cues.py, Phase 9 not yet built)
+  - `.venv/bin/pytest tests/ -v` — 314 passing (7 pre-existing failures in test_analyze_cues.py)
   - `.venv/bin/pytest tests/test_pipeline.py -v`
 
 ## Critical Invariants
@@ -59,6 +59,8 @@ Agent operating guide for this repository.
 - Crate logic and protection model: [multidj/crates.py](multidj/crates.py)
 - CLAP audio embeddings + KNN similarity: [multidj/embed.py](multidj/embed.py)
 - UMAP/HDBSCAN clustering + Vibe/ crate writing: [multidj/cluster.py](multidj/cluster.py)
+- Mixxx analysis BLOB generation (BeatGrid/KeyMap): [multidj/mixxx_blobs.py](multidj/mixxx_blobs.py)
+- Import Mixxx analysis results into MultiDJ: [multidj/import_mixxx_analysis.py](multidj/import_mixxx_analysis.py)
 - Canonical fixture data for tests: [tests/fixtures/data.py](tests/fixtures/data.py)
 
 ## Change Guidance
@@ -112,3 +114,10 @@ Agent operating guide for this repository.
 - `Vibe/` prefix added to `AUTO_CRATE_PREFIXES` and `REBUILD_CRATE_RE` in `constants.py`.
 - `get_llm_config()` added to `config.py` — reads `[llm].base_url`, `[llm].api_key`, `[llm].model`.
 - PoC verified: 35 tracks encoded, 3 clusters found, 4 Vibe/ crates written, similarity search working on CPU.
+
+## Repository Sync Note (2026-06-08b)
+
+- **BeatGrid BLOB fix:** `pack_beatgrid()` in `mixxx_blobs.py` was writing invalid raw double-struct (16 bytes) tagged as `BeatGrid-2.0`, causing Mixxx to log `"Failed to deserialize Beats: Parsing failed"` and re-analyze from scratch. Fixed to produce valid `track::io::BeatGrid` protobuf (proto2 LITE_RUNTIME) using existing hand-rolled encoder. Verified bit-for-bit against real Mixxx-produced BLOBs extracted from the user's own DB (155/142/140 BPM tracks).
+- **`multidj import mixxx-analysis` command:** New subcommand reads Mixxx's actual analysis results (`library.bpm`, `library.key`) directly from the Mixxx SQLite DB and imports them into MultiDJ's `tracks` table via path matching (`track_locations.location = tracks.path`). Use cases: (a) bootstrapping ground-truth BPM after running Mixxx GUI analyzer on a large library, (b) training data for NN models. `--apply` required to write, `--force` overwrites existing values, `--limit N` caps count. Dry-run by default. Skips tracks not found in MultiDJ gracefully. See `multidj/import_mixxx_analysis.py`.
+- **Headless BPM pipeline now complete:** The three-step flow runs entirely without Mixxx GUI: (1) `multidj import directory --apply` scans filesystem, (2) `multidj analyze bpm --apply` runs librosa beat detection in-venv, (3) `multidj analyze mixxx-blobs --apply` pushes valid BeatGrid BLOBs to Mixxx. With the BeatGrid fix, Mixxx loads these BLOBs without re-analysis — tracks open with BPM, waveform, and beatgrid ready.
+- **New tests:** `tests/test_mixxx_blobs.py` (8 tests — proto header, real-Mixxx bit-for-bit matches at 155/142/140 BPM, varint encoding, legacy struct detection, BPM round-trip). `tests/test_import_mixxx_analysis.py` (9 tests — dry-run, apply, force, limit, key import, mode field, missing Mixxx DB). Updated `tests/test_beatgrid.py` (7 tests rewritten from legacy struct to protobuf format). Full suite: 314 passed, 0 failed.
