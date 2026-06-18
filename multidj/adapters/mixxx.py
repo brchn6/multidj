@@ -435,25 +435,21 @@ class MixxxAdapter(SyncAdapter):
         else:
             filetype = filetype.split("/")[-1]
 
-        key_val = track.get("key") or ""
-
         mixxx_conn.execute(
             """INSERT INTO library
-               (artist, title, album, genre, bpm, rating, timesplayed, location,
-                duration, mixxx_deleted, header_parsed, filetype, key)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)""",
+               (artist, title, album, genre, rating, timesplayed, location,
+                duration, mixxx_deleted, header_parsed, filetype)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?)""",
             (
                 track.get("artist"),
                 track.get("title"),
                 track.get("album"),
                 track.get("genre"),
-                track.get("bpm"),
                 track.get("rating", 0),
                 track.get("play_count", 0),
                 loc_id,
                 duration,
                 filetype,
-                key_val,
             ),
         )
         return True
@@ -494,11 +490,10 @@ class MixxxAdapter(SyncAdapter):
         # Bootstrap: insert into Mixxx if missing
         self._ensure_track_in_mixxx(track, mixxx_conn)
 
-        # Find the Mixxx library id by path
         cur = mixxx_conn.execute(
             """
             UPDATE library SET
-                artist=?, title=?, album=?, genre=?, bpm=?, rating=?, timesplayed=?
+                artist=?, title=?, album=?, genre=?, rating=?, timesplayed=?
             WHERE id=(
                 SELECT l.id FROM library l
                 JOIN track_locations tl ON l.location = tl.id
@@ -510,7 +505,6 @@ class MixxxAdapter(SyncAdapter):
                 track.get("title"),
                 track.get("album"),
                 track.get("genre"),
-                track.get("bpm"),
                 track.get("rating"),
                 track.get("play_count"),
                 path,
@@ -520,24 +514,6 @@ class MixxxAdapter(SyncAdapter):
 
         if not updated:
             return False
-
-        # Handle key update — only if track has a key value and column exists
-        key = track.get("key")
-        if key is not None:
-            try:
-                mixxx_conn.execute(
-                    """
-                    UPDATE library SET key=?
-                    WHERE id=(
-                        SELECT l.id FROM library l
-                        JOIN track_locations tl ON l.location = tl.id
-                        WHERE tl.location = ?
-                    )
-                    """,
-                    (key, path),
-                )
-            except sqlite3.OperationalError:
-                pass  # no key column in older Mixxx schema
 
         self._sync_cover_art(path, mixxx_conn)
 
