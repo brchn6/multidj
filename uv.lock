@@ -2177,7 +2177,9 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "mutagen" },
+    { name = "samplings" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "unidecode" },
 ]
 
 [package.optional-dependencies]
@@ -2250,6 +2252,7 @@ requires-dist = [
     { name = "python3-discogs-client", marker = "extra == 'enrich'", specifier = ">=2.3" },
     { name = "rapidfuzz", marker = "extra == 'enrich'", specifier = ">=3.0" },
     { name = "requests", marker = "extra == 'clamp3'", specifier = ">=2.28" },
+    { name = "samplings", specifier = ">=0.1.7" },
     { name = "samplings", marker = "extra == 'clamp3'", specifier = ">=0.1.7" },
     { name = "soundfile", marker = "extra == 'clamp3'", specifier = ">=0.12" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
@@ -2261,6 +2264,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'embeddings'", specifier = ">=4.40" },
     { name = "umap-learn", marker = "extra == 'clamp3'", specifier = ">=0.5" },
     { name = "umap-learn", marker = "extra == 'embeddings'", specifier = ">=0.5" },
+    { name = "unidecode", specifier = ">=1.4.0" },
     { name = "unidecode", marker = "extra == 'clamp3'", specifier = ">=1.3" },
 ]
 provides-extras = ["analysis", "embeddings", "clamp3", "enrich"]
