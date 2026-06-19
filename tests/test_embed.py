@@ -38,6 +38,7 @@ def test_store_and_retrieve_embedding(db):
 
 
 def test_store_embedding_upserts(db):
+    """Re-storing the same (track_id, model_name) replaces the vector (upsert)."""
     with connect(str(db), readonly=True) as conn:
         track_id = conn.execute(
             "SELECT id FROM tracks WHERE deleted=0 LIMIT 1"
@@ -48,15 +49,39 @@ def test_store_embedding_upserts(db):
 
     with connect(str(db), readonly=False) as conn:
         store_embedding(conn, track_id, "model-v1", FIXED_VEC)
-        store_embedding(conn, track_id, "model-v2", vec2)
+        store_embedding(conn, track_id, "model-v1", vec2)  # same model → upsert
+        conn.commit()
+
+    raw = sqlite3.connect(str(db))
+    count = raw.execute(
+        "SELECT COUNT(*) FROM embeddings WHERE track_id=? AND model_name=?",
+        (track_id, "model-v1"),
+    ).fetchone()[0]
+    row = raw.execute(
+        "SELECT vector FROM embeddings WHERE track_id=? AND model_name=?",
+        (track_id, "model-v1"),
+    ).fetchone()
+    raw.close()
+    assert count == 1  # upsert, not insert
+    np.testing.assert_allclose(_blob_to_vec(row[0])[0], 9.9, rtol=1e-4)
+
+
+def test_two_models_create_two_rows(db):
+    """Different model names create separate embedding rows for the same track."""
+    with connect(str(db), readonly=True) as conn:
+        track_id = conn.execute(
+            "SELECT id FROM tracks WHERE deleted=0 LIMIT 1"
+        ).fetchone()["id"]
+
+    with connect(str(db), readonly=False) as conn:
+        store_embedding(conn, track_id, "model-v1", FIXED_VEC)
+        store_embedding(conn, track_id, "model-v2", FIXED_VEC)
         conn.commit()
 
     raw = sqlite3.connect(str(db))
     count = raw.execute("SELECT COUNT(*) FROM embeddings WHERE track_id=?", (track_id,)).fetchone()[0]
-    row = raw.execute("SELECT vector FROM embeddings WHERE track_id=?", (track_id,)).fetchone()
     raw.close()
-    assert count == 1  # upsert, not insert
-    np.testing.assert_allclose(_blob_to_vec(row[0])[0], 9.9, rtol=1e-4)
+    assert count == 2
 
 
 def _stub_load_clap():

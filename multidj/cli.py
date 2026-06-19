@@ -222,11 +222,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force",       action="store_true", help="Overwrite existing key values")
     p.add_argument("--verbose", "-v", action="store_true", help="Show detected key for each track")
 
-    p_embed = analyze_sub.add_parser("embed", help="Encode tracks as CLAP audio embeddings")
+    p_embed = analyze_sub.add_parser("embed", help="Encode tracks as audio embeddings (CLAP or CLaMP3)")
     p_embed.add_argument("--apply",     action="store_true", help="Write embeddings (default: dry-run)")
     p_embed.add_argument("--force",     action="store_true", help="Re-encode already-embedded tracks")
     p_embed.add_argument("--limit",     type=int, default=None, help="Cap number of tracks to process")
     p_embed.add_argument("--no-backup", action="store_true", dest="no_backup")
+    p_embed.add_argument(
+        "--model",
+        default="clap",
+        choices=["clap", "clamp3"],
+        help="Embedding model: 'clap' (512-dim, default) or 'clamp3' (768-dim, MERT+CLaMP3 SAAS)",
+    )
 
     p_cues = analyze_sub.add_parser("cues", help="Detect structural cues (intro/verse/chorus/drop/outro)")
     p_cues.add_argument("--apply", action="store_true", help="Write cues to DB (default: dry-run)")
@@ -296,12 +302,18 @@ def build_parser() -> argparse.ArgumentParser:
     cluster_p = sub.add_parser("cluster", help="Cluster tracks by embedding similarity")
     cluster_sub = cluster_p.add_subparsers(dest="cluster_target", required=True)
 
-    p_vibe = cluster_sub.add_parser("vibe", help="Build Vibe/ crates from CLAP embedding clusters")
+    p_vibe = cluster_sub.add_parser("vibe", help="Build Vibe/ crates from embedding clusters")
     p_vibe.add_argument("--apply",            action="store_true", help="Write Vibe/ crates to DB")
     p_vibe.add_argument("--min-cluster-size", type=int, default=5, dest="min_cluster_size",
                         help="Minimum tracks per cluster (default: 5)")
     p_vibe.add_argument("--prefix",           default="Vibe/", help="Crate name prefix (default: Vibe/)")
     p_vibe.add_argument("--no-backup",        action="store_true", dest="no_backup")
+    p_vibe.add_argument(
+        "--model",
+        default=None,
+        choices=["clap", "clamp3"],
+        help="Which embeddings to cluster: 'clap' or 'clamp3' (default: most recently stored)",
+    )
 
     # ── similar ───────────────────────────────────────────────────────────────
     p_similar = sub.add_parser("similar", help="Find tracks similar to a given track by embedding distance")
@@ -309,6 +321,12 @@ def build_parser() -> argparse.ArgumentParser:
                            help="File path or 'Artist - Title' search string")
     p_similar.add_argument("--top", type=int, default=10, dest="top_n",
                            help="Number of similar tracks to return (default: 10)")
+    p_similar.add_argument(
+        "--model",
+        default=None,
+        choices=["clap", "clamp3"],
+        help="Which embedding model to use for similarity (default: auto-detect from DB)",
+    )
 
     # ── import ────────────────────────────────────────────────────────────────
     import_p = sub.add_parser("import", help="Import tracks from external sources")
@@ -492,6 +510,7 @@ def main(argv: list[str] | None = None) -> int:
                 force=args.force,
                 limit=args.limit,
                 backup_dir=False if args.no_backup else None,
+                model=args.model,
             )
         elif args.analyze_target == "key":
             result = analyze_key(
@@ -571,6 +590,7 @@ def main(argv: list[str] | None = None) -> int:
                     prefix=args.prefix,
                     llm_config=get_llm_config(),
                     backup_dir=False if args.no_backup else None,
+                    model=args.model,
                 )
             except RuntimeError as exc:
                 print(str(exc), file=sys.stderr)
@@ -579,7 +599,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "similar":
         from .embed import find_similar
         try:
-            result = find_similar(db_path=args.db, track_ref=args.track_ref, top_n=args.top_n)
+            result = find_similar(db_path=args.db, track_ref=args.track_ref, top_n=args.top_n,
+                                  model=args.model)
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1

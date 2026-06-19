@@ -1,3 +1,17 @@
+"""Audio embedding support for MultiDJ.
+
+Supports two backends, selected via the ``model`` parameter:
+
+* ``"clap"``   — LAION CLAP (``laion/larger_clap_music``), 512-dim.
+                 Default; requires ``uv sync --extra embeddings``.
+* ``"clamp3"`` — CLaMP 3 SAAS (MERT-v1-95M → CLaMP3 audio encoder), 768-dim.
+                 Requires ``uv sync --extra clamp3`` and
+                 ``git submodule update --init vendor/clamp3``.
+
+Both backends share the same ``embeddings`` table, keyed by
+``(track_id, model_name)``.  The ``model_name`` column distinguishes them so
+CLAP and CLaMP3 embeddings can coexist for the same track.
+"""
 from __future__ import annotations
 
 import sys
@@ -9,7 +23,17 @@ import numpy as np
 from .db import connect, ensure_not_empty
 
 
-MODEL_NAME = "laion/larger_clap_music"
+# ---------------------------------------------------------------------------
+# Model name constants
+# ---------------------------------------------------------------------------
+MODEL_CLAP = "laion/larger_clap_music"
+MODEL_CLAMP3 = "clamp3_saas"
+
+# Legacy alias kept for backward compatibility
+MODEL_NAME = MODEL_CLAP
+
+_DEFAULT_MODEL = MODEL_CLAP
+
 _SR = 48_000
 _WINDOW_SECS = 30
 
@@ -17,6 +41,10 @@ _WINDOW_SECS = 30
 def _progress(msg: str, end: str = "\n") -> None:
     print(msg, file=sys.stderr, end=end, flush=True)
 
+
+# ---------------------------------------------------------------------------
+# Blob serialisation helpers (shared by both backends)
+# ---------------------------------------------------------------------------
 
 def _vec_to_blob(v: np.ndarray) -> bytes:
     return v.astype(np.float32).tobytes()
@@ -26,40 +54,80 @@ def _blob_to_vec(b: bytes) -> np.ndarray:
     return np.frombuffer(b, dtype=np.float32).copy()
 
 
+# ---------------------------------------------------------------------------
+# DB helpers
+# ---------------------------------------------------------------------------
+
 def store_embedding(
     conn,
     track_id: int,
     model_name: str,
     vector: np.ndarray,
 ) -> None:
+    """Upsert an embedding row keyed by (track_id, model_name)."""
     conn.execute(
         """
         INSERT INTO embeddings (track_id, model_name, vector)
         VALUES (?, ?, ?)
-        ON CONFLICT(track_id) DO UPDATE
-            SET model_name = excluded.model_name,
-                vector     = excluded.vector,
+        ON CONFLICT(track_id, model_name) DO UPDATE
+            SET vector     = excluded.vector,
                 created_at = datetime('now')
         """,
         (track_id, model_name, _vec_to_blob(vector)),
     )
 
 
-def load_embeddings_from_db(conn) -> tuple[list[int], np.ndarray]:
-    """Return (track_ids, matrix) for all non-deleted embedded tracks."""
-    rows = conn.execute("""
-        SELECT e.track_id, e.vector
-        FROM embeddings e
-        JOIN tracks t ON e.track_id = t.id
-        WHERE t.deleted = 0
-        ORDER BY e.track_id
-    """).fetchall()
+def load_embeddings_from_db(
+    conn,
+    model_name: str | None = None,
+) -> tuple[list[int], np.ndarray]:
+    """Return (track_ids, matrix) for all non-deleted embedded tracks.
+
+    If *model_name* is given, only embeddings for that model are returned.
+    If *model_name* is ``None``, all embeddings are returned (picking the most
+    recently stored one per track when multiple models exist).
+
+    The returned matrix has shape ``(n, dim)`` where ``dim`` depends on the
+    model (512 for CLAP, 768 for CLaMP3).  When no rows exist, an empty array
+    with shape ``(0, 0)`` is returned.
+    """
+    if model_name:
+        rows = conn.execute(
+            """
+            SELECT e.track_id, e.vector
+            FROM embeddings e
+            JOIN tracks t ON e.track_id = t.id
+            WHERE t.deleted = 0 AND e.model_name = ?
+            ORDER BY e.track_id
+            """,
+            (model_name,),
+        ).fetchall()
+    else:
+        # Return the most recent embedding per track (across all models)
+        rows = conn.execute(
+            """
+            SELECT e.track_id, e.vector
+            FROM embeddings e
+            JOIN tracks t ON e.track_id = t.id
+            WHERE t.deleted = 0
+            GROUP BY e.track_id
+            HAVING e.created_at = MAX(e.created_at)
+            ORDER BY e.track_id
+            """,
+        ).fetchall()
+
     if not rows:
-        return [], np.empty((0, 512), dtype=np.float32)
+        return [], np.empty((0, 0), dtype=np.float32)
+
     track_ids = [r["track_id"] for r in rows]
-    matrix = np.stack([_blob_to_vec(r["vector"]) for r in rows])
+    vecs = [_blob_to_vec(r["vector"]) for r in rows]
+    matrix = np.stack(vecs)
     return track_ids, matrix
 
+
+# ---------------------------------------------------------------------------
+# CLAP backend
+# ---------------------------------------------------------------------------
 
 def load_clap_model() -> tuple[Any, Any, str]:
     """Load CLAP model + processor. Returns (model, processor, device)."""
@@ -76,15 +144,15 @@ def load_clap_model() -> tuple[Any, Any, str]:
         else "mps" if torch.backends.mps.is_available()
         else "cpu"
     )
-    _progress(f"Loading CLAP model ({MODEL_NAME}) on {device}…")
-    model = ClapModel.from_pretrained(MODEL_NAME).to(device)
-    processor = ClapProcessor.from_pretrained(MODEL_NAME)
+    _progress(f"Loading CLAP model ({MODEL_CLAP}) on {device}…")
+    model = ClapModel.from_pretrained(MODEL_CLAP).to(device)
+    processor = ClapProcessor.from_pretrained(MODEL_CLAP)
     model.eval()
     return model, processor, device
 
 
 def _encode_audio_file(filepath: str, model: Any, processor: Any, device: str) -> np.ndarray:
-    """Encode a single audio file: sample 3 × 30 s windows, return mean 512-d vector."""
+    """Encode a single audio file with CLAP: 3 × 30 s windows → mean 512-d vector."""
     try:
         import librosa  # type: ignore
         import torch
@@ -116,16 +184,36 @@ def _encode_audio_file(filepath: str, model: Any, processor: Any, device: str) -
     return np.mean(embeddings, axis=0)
 
 
+# ---------------------------------------------------------------------------
+# Unified analyze_embed (dispatches to CLAP or CLaMP3)
+# ---------------------------------------------------------------------------
+
 def analyze_embed(
     db_path: str | None = None,
     apply: bool = False,
     force: bool = False,
     limit: int | None = None,
     backup_dir: str | None | bool = None,
+    model: str = _DEFAULT_MODEL,
 ) -> dict[str, Any]:
-    # Ensure migration 005 (embeddings table) is applied before reading.
+    """Embed all un-embedded tracks using the selected model backend.
+
+    Parameters
+    ----------
+    model:
+        ``"clap"`` (default) or ``"clamp3"``.  Can also be the full model
+        name string (``"laion/larger_clap_music"`` or ``"clamp3_saas"``).
+    """
+    # Normalise model alias
+    if model in ("clap",):
+        model = MODEL_CLAP
+    elif model in ("clamp3",):
+        model = MODEL_CLAMP3
+
+    # Ensure migration 007 (composite PK) is applied before reading.
     with connect(db_path, readonly=False) as _:
         pass
+
     with connect(db_path, readonly=True) as conn:
         ensure_not_empty(conn)
         if force:
@@ -133,20 +221,23 @@ def analyze_embed(
                 "SELECT id, path FROM tracks WHERE deleted=0 ORDER BY id"
             ).fetchall()
         else:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT t.id, t.path
                 FROM tracks t
-                LEFT JOIN embeddings e ON t.id = e.track_id
+                LEFT JOIN embeddings e ON t.id = e.track_id AND e.model_name = ?
                 WHERE t.deleted = 0 AND e.track_id IS NULL
                 ORDER BY t.id
-            """).fetchall()
+                """,
+                (model,),
+            ).fetchall()
 
     candidates = [{"id": r["id"], "path": r["path"]} for r in rows]
     if limit is not None:
         candidates = candidates[:limit]
     total = len(candidates)
 
-    _progress(f"analyze embed — {total} track(s) to embed (model: {MODEL_NAME})")
+    _progress(f"analyze embed — {total} track(s) to embed (model: {model})")
 
     if not apply:
         return {
@@ -155,18 +246,30 @@ def analyze_embed(
             "processed": 0,
             "succeeded": 0,
             "errors": 0,
-            "model": MODEL_NAME,
+            "model": model,
         }
 
-    model, processor, device = load_clap_model()
+    # --- Load model ---
+    if model == MODEL_CLAMP3:
+        from .embed_clamp3 import load_clamp3_model, encode_audio_clamp3
+        mert_model, mert_processor, clamp3_model, device = load_clamp3_model()
+
+        def _encode(path: str) -> np.ndarray:
+            return encode_audio_clamp3(path, mert_model, mert_processor, clamp3_model, device)
+    else:
+        clap_model, processor, device = load_clap_model()
+
+        def _encode(path: str) -> np.ndarray:  # type: ignore[misc]
+            return _encode_audio_file(path, clap_model, processor, device)
+
     succeeded = errors = 0
 
     with connect(db_path, readonly=False) as conn:
         for i, row in enumerate(candidates):
             _progress(f"  [{i + 1}/{total}] {Path(row['path']).name}", end="\r")
             try:
-                vec = _encode_audio_file(row["path"], model, processor, device)
-                store_embedding(conn, row["id"], MODEL_NAME, vec)
+                vec = _encode(row["path"])
+                store_embedding(conn, row["id"], model, vec)
                 conn.commit()
                 succeeded += 1
             except Exception as exc:
@@ -180,16 +283,31 @@ def analyze_embed(
         "processed": total,
         "succeeded": succeeded,
         "errors": errors,
-        "model": MODEL_NAME,
+        "model": model,
     }
 
+
+# ---------------------------------------------------------------------------
+# Similarity search
+# ---------------------------------------------------------------------------
 
 def find_similar(
     db_path: str | None = None,
     track_ref: str = "",
     top_n: int = 10,
+    model: str | None = None,
 ) -> dict[str, Any]:
-    """Return the top_n most similar tracks by cosine distance in embedding space."""
+    """Return the top_n most similar tracks by cosine distance in embedding space.
+
+    If *model* is ``None``, uses whatever embeddings are stored for the query
+    track (preferring the most recently stored model).
+    """
+    # Normalise model aliases
+    if model in ("clap",):
+        model = MODEL_CLAP
+    elif model in ("clamp3",):
+        model = MODEL_CLAMP3
+
     with connect(db_path, readonly=True) as conn:
         ensure_not_empty(conn)
 
@@ -210,16 +328,27 @@ def find_similar(
         query_id = row["id"]
         query_info = {"id": query_id, "artist": row["artist"], "title": row["title"]}
 
-        emb_row = conn.execute(
-            "SELECT vector FROM embeddings WHERE track_id = ?", (query_id,)
-        ).fetchone()
+        # Find the query embedding (prefer the requested model if specified)
+        if model:
+            emb_row = conn.execute(
+                "SELECT vector, model_name FROM embeddings WHERE track_id = ? AND model_name = ?",
+                (query_id, model),
+            ).fetchone()
+        else:
+            emb_row = conn.execute(
+                "SELECT vector, model_name FROM embeddings WHERE track_id = ? ORDER BY created_at DESC LIMIT 1",
+                (query_id,),
+            ).fetchone()
+
         if not emb_row:
             raise RuntimeError(
-                f"Track has no embedding. Run 'multidj analyze embed --apply' first."
+                "Track has no embedding. Run 'multidj analyze embed --apply' first."
             )
         query_vec = _blob_to_vec(emb_row["vector"])
+        active_model = emb_row["model_name"]
 
-        track_ids, vectors = load_embeddings_from_db(conn)
+        # Load all embeddings for the same model
+        track_ids, vectors = load_embeddings_from_db(conn, model_name=active_model)
 
         query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-8)
         norms = np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-8
@@ -244,4 +373,4 @@ def find_similar(
             if len(results) >= top_n:
                 break
 
-    return {"query_track": query_info, "similar": results}
+    return {"query_track": query_info, "similar": results, "model": active_model}

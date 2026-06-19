@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 from .db import connect, ensure_not_empty
-from .embed import load_embeddings_from_db
+from .embed import load_embeddings_from_db, MODEL_CLAP, MODEL_CLAMP3
 
 # Optional dependency — imported at module level so tests can patch multidj.cluster.OpenAI.
 # Raises RuntimeError with install instructions if openai is missing and name_cluster() is called.
@@ -25,10 +25,11 @@ def _numbered_name(idx: int) -> str:
 
 
 def cluster_embeddings(vectors: np.ndarray, min_cluster_size: int) -> np.ndarray:
-    """UMAP 512d→10d then HDBSCAN. Returns integer label array (-1 = noise).
+    """UMAP dim→10d then HDBSCAN. Returns integer label array (-1 = noise).
 
-    Falls back to PCA for small datasets (< 30 points) where UMAP's graph
-    construction is unstable, especially with near-duplicate vectors.
+    The input ``vectors`` may have any embedding dimension (512 for CLAP,
+    768 for CLaMP3, etc.).  Falls back to PCA for small datasets (< 30
+    points) where UMAP's graph construction is unstable.
     """
     try:
         import umap  # type: ignore
@@ -141,10 +142,27 @@ def cluster_vibe(
     prefix: str = "Vibe/",
     llm_config: dict[str, Any] | None = None,
     backup_dir: str | None | bool = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
+    """Cluster embedded tracks into Vibe/ crates.
+
+    Parameters
+    ----------
+    model:
+        Restrict clustering to embeddings produced by this model name
+        (e.g. ``"clamp3_saas"`` or ``"laion/larger_clap_music"``).
+        Accepts the short aliases ``"clap"`` and ``"clamp3"`` as well.
+        If ``None``, uses the most recently stored embedding per track.
+    """
+    # Normalise model alias
+    if model in ("clap",):
+        model = MODEL_CLAP
+    elif model in ("clamp3",):
+        model = MODEL_CLAMP3
+
     with connect(db_path, readonly=True) as conn:
         ensure_not_empty(conn)
-        track_ids, vectors = load_embeddings_from_db(conn)
+        track_ids, vectors = load_embeddings_from_db(conn, model_name=model)
 
     total_embedded = len(track_ids)
     if total_embedded < min_cluster_size * 2:
@@ -154,7 +172,11 @@ def cluster_vibe(
             f"Run 'multidj analyze embed --apply' first."
         )
 
-    _log(f"cluster vibe — clustering {total_embedded} embeddings (min_cluster_size={min_cluster_size})")
+    model_label = model or "any"
+    _log(
+        f"cluster vibe — clustering {total_embedded} embeddings "
+        f"(model: {model_label}, min_cluster_size={min_cluster_size})"
+    )
     labels = cluster_embeddings(vectors, min_cluster_size)
 
     clusters: dict[int, list[int]] = {}
@@ -204,6 +226,7 @@ def cluster_vibe(
             "noise_tracks": noise_count,
             "crates_written": 0,
             "clusters": crate_list,
+            "model": model_label,
         }
 
     with connect(db_path, readonly=False) as conn:
@@ -216,4 +239,5 @@ def cluster_vibe(
         "noise_tracks": noise_count,
         "crates_written": len(written),
         "clusters": written,
+        "model": model_label,
     }
