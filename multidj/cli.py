@@ -118,6 +118,34 @@ def _format_enrich_metadata(data: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_suggest(data: dict) -> str:
+    q = data["query_track"]
+    cluster = data.get("cluster") or "full library"
+    model = data.get("model", "?")
+    bpm_win = data.get("bpm_window", 15)
+    suggestions = data.get("suggestions", [])
+
+    lines = [
+        f"Next-track suggestions for: {q.get('artist') or ''} — {q.get('title') or ''}",
+        f"  BPM: {q.get('bpm') or '?'}  Key: {q.get('key') or '?'}  Cluster: {cluster}",
+        f"  Model: {model}  BPM window: ±{bpm_win}",
+        "",
+        f"{'#':>3}  {'Score':>6}  {'Sim':>5}  {'BPM':>5}  {'Key':<6}  Artist — Title",
+        "─" * 72,
+    ]
+    for i, s in enumerate(suggestions, 1):
+        a = (s.get("artist") or "").strip()
+        t = (s.get("title") or "").strip()
+        name = f"{a} — {t}" if a else t
+        lines.append(
+            f"{i:>3}.  {s['score']:>6.4f}  {s['cosine_sim']:>5.3f}  "
+            f"{str(s.get('bpm') or '?'):>5}  {str(s.get('key') or '?'):<6}  {name[:50]}"
+        )
+    if not suggestions:
+        lines.append("  No suggestions found.")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="multidj",
@@ -326,6 +354,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         choices=["clap", "clamp3"],
         help="Which embedding model to use for similarity (default: auto-detect from DB)",
+    )
+
+    # ── suggest ───────────────────────────────────────────────────────────────
+    p_suggest = sub.add_parser("suggest", help="DJ next-track suggestion: ranked by embedding + BPM + key")
+    p_suggest.add_argument("track_ref", metavar="TRACK",
+                           help="File path or 'Artist - Title' search string for the playing track")
+    p_suggest.add_argument("--top", type=int, default=10, dest="top_n",
+                           help="Number of suggestions to return (default: 10)")
+    p_suggest.add_argument("--bpm-window", type=float, default=15.0, dest="bpm_window",
+                           help="BPM tolerance for BPM compatibility scoring (default: 15)")
+    p_suggest.add_argument("--any-cluster", action="store_true", dest="any_cluster",
+                           help="Search entire library instead of restricting to same Vibe/ cluster")
+    p_suggest.add_argument(
+        "--model",
+        default=None,
+        choices=["clap", "clamp3"],
+        help="Which embedding model to use (default: auto-detect from DB)",
     )
 
     # ── import ────────────────────────────────────────────────────────────────
@@ -604,6 +649,23 @@ def main(argv: list[str] | None = None) -> int:
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1
+
+    elif args.command == "suggest":
+        from .suggest import suggest_next
+        try:
+            result = suggest_next(
+                db_path=args.db,
+                track_ref=args.track_ref,
+                top_n=args.top_n,
+                bpm_window=args.bpm_window,
+                any_cluster=args.any_cluster,
+                model=args.model,
+            )
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        emit(_format_suggest(result) if not args.json else result, as_json=args.json)
+        return 0
 
     elif args.command == "import":
         if args.import_target == "mixxx":
