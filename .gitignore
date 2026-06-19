@@ -27,3 +27,4 @@ env/
 None
 multidj_report.html
 .worktrees/
+vendor/clamp3/
