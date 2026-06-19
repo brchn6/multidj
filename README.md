@@ -16,12 +16,23 @@ Optional audio analysis (BPM, key, energy detection):
 uv sync --extra analysis
 ```
 
-Optional semantic embeddings, clustering, and similarity search:
+Optional semantic embeddings, clustering, similarity search, and DJ suggestions:
 ```bash
 uv sync --extra embeddings
 ```
 
-The `embeddings` extra adds CLAP audio encoding, UMAP+HDBSCAN clustering, and the `multidj similar` command. It includes `librosa`, `torch`, `transformers`, `umap-learn`, `hdbscan`, and `openai`. The CLAP model weights (~1.5 GB) are downloaded on first use to `~/.cache/huggingface/hub/`.
+The `embeddings` extra adds CLAP audio encoding (`laion/larger_clap_music`, 512-dim), UMAP+HDBSCAN clustering, and the `multidj similar` / `multidj suggest` commands. Model weights (~1.5 GB) are downloaded on first use.
+
+Optional CLaMP3 backend (for future text→audio agent vibe search):
+```bash
+uv sync --extra clamp3
+git submodule update --init vendor/clamp3
+```
+
+Optional metadata enrichment (Discogs + MusicBrainz):
+```bash
+uv sync --extra enrich
+```
 
 ## How MultiDJ uses two databases
 
@@ -73,9 +84,9 @@ multidj pipeline \
 `multidj pipeline` chains all steps in order:
 
 ```
-import directory → fix mismatches → parse → dedupe
-→ analyze bpm → analyze key → analyze energy → analyze embed → cluster vibe
-→ clean genres → clean text → crates rebuild → sync mixxx → report
+import directory → fix mismatches → parse → enrich metadata → analyze bpm → analyze key
+→ analyze mixxx-blobs → analyze energy → analyze embed → cluster vibe → analyze cues
+→ clean genres → clean text → crates rebuild → sync mixxx → dedupe → report
 ```
 
 ```bash
@@ -260,11 +271,14 @@ multidj analyze energy --force   # reprocess all tracks
 ### Semantic embeddings (requires `uv sync --extra embeddings`)
 
 ```bash
-multidj analyze embed            # dry-run: show how many tracks need embedding
-multidj analyze embed --apply    # encode all un-embedded tracks with CLAP (laion/larger_clap_music)
-multidj analyze embed --force    # re-encode all tracks (overwrite existing embeddings)
-multidj analyze embed --limit 50 # encode at most 50 tracks this run
+multidj analyze embed                       # dry-run: show how many tracks need embedding
+multidj analyze embed --apply               # encode with CLAP (laion/larger_clap_music, 512-dim)
+multidj analyze embed --apply --model clamp3 # encode with CLaMP3 (768-dim, cross-modal)
+multidj analyze embed --force               # re-encode all tracks
+multidj analyze embed --limit 50            # encode at most 50 tracks this run
 ```
+
+CLAP and CLaMP3 embeddings coexist per track in the `embeddings` table (composite key on `(track_id, model_name)`).
 
 ### Clustering (requires `uv sync --extra embeddings`)
 
@@ -274,7 +288,7 @@ multidj cluster vibe --apply     # UMAP+HDBSCAN → write Vibe/ auto-crates to D
 multidj cluster vibe --apply --min-cluster-size 10
 ```
 
-Produces crates named `Vibe/Dark-Techno` (if LLM naming configured) or `Vibe/Cluster-01` (fallback). Noise tracks go to `Vibe/Unclassified`. LLM naming is configured via `~/.multidj/config.toml`:
+Produces crates named `Vibe/Dark-Techno` (if LLM naming configured) or `Vibe/Cluster-01` (fallback). Noise tracks go to `Vibe/Unclassified`. LLM naming via `~/.multidj/config.toml`:
 
 ```toml
 [llm]
@@ -286,13 +300,30 @@ model    = "deepseek/deepseek-chat"
 ### Similarity search (requires `uv sync --extra embeddings`)
 
 ```bash
-multidj similar "AT NIGHT DUB"     # find the 10 most similar tracks by cosine distance
+multidj similar "AT NIGHT DUB"     # 10 most similar tracks by cosine distance
 multidj similar "Artist - Title"   # partial match on artist+title
 multidj similar /path/to/file.mp3  # exact path match
 multidj similar "AT NIGHT DUB" --top 20
 ```
 
-Returns tracks ranked by cosine distance in CLAP embedding space (0 = identical, 1 = maximally different). Track must have been embedded first with `analyze embed --apply`.
+### DJ next-track suggestion (requires `uv sync --extra embeddings`)
+
+```bash
+multidj suggest "Artist - Title"               # top 10 next-track candidates
+multidj suggest "Artist - Title" --top 5       # show 5
+multidj suggest "Artist - Title" --bpm-window 10  # tighter BPM tolerance (default: 15)
+multidj suggest "Artist - Title" --any-cluster    # search whole library, not just same Vibe/ cluster
+```
+
+Ranks candidates by a composite DJ-mixing score:
+
+```
+score = 0.70 × cosine_similarity
+      + 0.15 × BPM_compatibility   (linear decay to 0 at ±bpm-window BPM)
+      + 0.15 × Camelot_key_compat  (1.0 = same key, 0.75 = adjacent/relative, 0.0 = clash)
+```
+
+By default results come from the same `Vibe/` cluster as the query track (run `cluster vibe --apply` first).
 
 ### Parse filenames
 
@@ -307,6 +338,32 @@ multidj parse --force            # overwrite already-tagged fields
 
 ```bash
 multidj enrich language          # detect Hebrew tracks (Unicode range check)
+
+# Metadata enrichment — requires uv sync --extra enrich
+multidj enrich metadata          # dry-run: file tags → Discogs → MusicBrainz
+multidj enrich metadata --apply  # write release_year, label, album, genre to DB
+multidj enrich metadata --apply --write-tags  # also update audio file tags
+multidj enrich metadata --force  # re-enrich already-enriched tracks
+```
+
+Configure Discogs and MusicBrainz tokens in `~/.multidj/config.toml` under `[discogs]` and `[musicbrainz]`.
+
+### Standalone scripts
+
+These tools run outside the CLI and produce self-contained HTML files:
+
+```bash
+# Interactive UMAP scatter plot — click a track to see next-track suggestions in sidebar
+python scripts/viz_library.py
+python scripts/viz_library.py --out /tmp/viz.html --neighbors 10
+
+# Data science diagnostics — 6-panel dashboard: coverage, genre, BPM, key, similarity, clusters
+python scripts/diagnostics.py
+python scripts/diagnostics.py --out /tmp/diag.html --sample 600
+
+# Zero-shot genre detection using CLAP + folder heuristics
+python scripts/genre_detect.py --limit 50           # dry-run
+python scripts/genre_detect.py --apply              # write genres to DB
 ```
 
 ### Report
