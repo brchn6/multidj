@@ -95,7 +95,9 @@ multidj import directory --apply   # reads music_dir from config; imports new fi
 multidj sync mixxx --apply         # pushes all dirty tracks + crates to Mixxx
 ```
 
-> BPM and key stored in Mixxx are never overwritten by the sync. Only artist, title, album, genre, rating, and play count are pushed. Crate membership is repopulated from MultiDJ.
+> Sync pushes artist, title, album, genre, rating, and play count, and repopulates crate membership from MultiDJ. It also fills **BPM only when Mixxx has none** (NULL/0) and never overwrites an existing Mixxx BPM. Key is never written by sync.
+>
+> ⚠️ Writing a raw `library.bpm` value without a matching BeatGrid BLOB is a **known-unstable stopgap** — Mixxx may display it inconsistently. For BPM that Mixxx recognizes reliably, use `analyze bpm` → `analyze mixxx-blobs` (writes a real BeatGrid-2.0 BLOB).
 
 ### BPM + key analysis for tracks Mixxx doesn't have
 
@@ -112,12 +114,13 @@ multidj analyze mixxx-blobs --apply     # write BeatGrid + KeyMap BLOBs back to 
 
 ## The pipeline
 
-`multidj pipeline` chains all steps in order:
+`multidj pipeline` chains **19 steps across 4 phases**, in order:
 
 ```
-import directory → fix mismatches → parse → enrich metadata → analyze bpm → analyze key
-→ analyze mixxx-blobs → analyze energy → analyze embed → cluster vibe → analyze cues
-→ clean genres → clean text → crates rebuild → sync mixxx → dedupe → report
+Phase 1 INGEST   import → dedupe → fix_mismatches → parse
+Phase 2 ANALYZE  mixxx_import → bpm → key → mixxx_blobs → energy → embed → cues
+Phase 3 ENRICH   clean_text → enrich_meta → enrich_genre → clean_genres
+Phase 4 SYNC     cluster → crates → sync → report
 ```
 
 ```bash
@@ -125,10 +128,25 @@ multidj pipeline --apply      # execute everything
 multidj pipeline              # dry-run: preview without writing
 ```
 
+The pipeline is idempotent and incremental — every analyze step skips tracks it has
+already processed, so it's safe to re-run daily. It takes a single backup at the start.
+
+### Run a single phase
+
+```bash
+multidj pipeline --apply --phase ingest    # only import/dedupe/fix_mismatches/parse
+multidj pipeline --apply --phase analyze   # only mixxx_import/bpm/key/mixxx_blobs/energy/embed/cues
+multidj pipeline --apply --phase enrich    # only clean_text/enrich_meta/enrich_genre/clean_genres
+multidj pipeline --apply --phase sync      # only cluster/crates/sync/report
+```
+
 ### Other flags
 
 ```bash
 multidj pipeline --apply --skip-sync   # rebuild crates without touching Mixxx
+
+# Skip any individual step: --skip-import, --skip-bpm, --skip-key, --skip-cues,
+# --skip-embed, --skip-cluster, --skip-enrich, --skip-enrich-genre, --skip-genres, etc.
 
 # Write report to custom path
 multidj pipeline --apply --report-output /path/to/report.html
@@ -239,9 +257,12 @@ path = "~/.mixxx/mixxxdb.sqlite"   # used by pipeline/sync/import when --mixxx-d
 ```bash
 multidj import mixxx [--mixxx-db PATH] [--apply] [--no-backup]
 multidj import directory PATH [--apply] [--no-backup]
+multidj import mixxx-analysis [--mixxx-db PATH] [--apply] [--force] [--limit N]
 ```
 
 Tracks imported from any path are first-class library members — they flow through all pipeline steps regardless of where their files live.
+
+`import mixxx-analysis` is a one-way pull of Mixxx's **own** BPM/key analysis into MultiDJ (matched by path). The pipeline runs this first in the analyze phase, so tracks Mixxx already analyzed skip MultiDJ's own BPM/key detection.
 
 ### Sync to Mixxx
 
@@ -250,6 +271,12 @@ multidj sync mixxx [--mixxx-db PATH] [--apply] [--no-backup]
 ```
 
 Pushes dirty tracks **and** crates to Mixxx. MultiDJ is the source of truth — Mixxx is a display layer.
+
+**Cues in Mixxx.** On sync, high-confidence intro/drop/outro cues are self-annotated into
+Mixxx hot-cue slots — Intro → slot 0 (blue), Drop → slot 1 (red), Outro → slot 2 (green).
+MultiDJ replaces only the slots it manages and **never deletes hot cues from Mixxx** —
+running `cues clear` removes cues from the MultiDJ DB only; cues already written into Mixxx
+(and any you set by hand) are preserved.
 
 ### Library health
 
@@ -291,6 +318,35 @@ multidj analyze key --force      # overwrite existing keys
 multidj analyze energy           # dry-run: list tracks needing energy score
 multidj analyze energy --apply   # detect energy (0.0–1.0) and write to DB
 multidj analyze energy --force   # reprocess all tracks
+```
+
+### Mixxx pre-analysis BLOBs
+
+Write proper BeatGrid-2.0 + KeyMap-1.0 protobuf BLOBs into the Mixxx DB so Mixxx
+recognizes BPM/key reliably (the correct path for stable BPM — see the sync note above):
+
+```bash
+multidj analyze mixxx-blobs              # dry-run
+multidj analyze mixxx-blobs --apply      # write BeatGrid + KeyMap BLOBs to Mixxx
+multidj analyze mixxx-blobs --apply --force   # rewrite even where Mixxx already has analysis
+multidj analyze mixxx-blobs --apply --lock-bpm
+```
+
+Logs `SKIPPED` (Mixxx already owns the BPM) or `WROTE` per track so the BPM/key
+protection is observable.
+
+### Cue detection (requires `uv sync --extra embeddings`)
+
+Structural segmentation (intro/verse/chorus/drop/outro) via allin1 + librosa
+cross-validation. On `sync mixxx`, high-confidence intro/drop/outro are pushed to Mixxx
+hot-cue slots 0/1/2 (see "Cues in Mixxx" below).
+
+```bash
+multidj analyze cues             # dry-run
+multidj analyze cues --apply     # detect and store cue_points
+multidj analyze cues --force     # re-detect (manual cues are never overwritten)
+
+multidj cues clear --apply       # remove all auto-detected cues from the MultiDJ DB
 ```
 
 ### Semantic embeddings (requires `uv sync --extra embeddings`)
@@ -372,6 +428,13 @@ multidj enrich metadata --force  # re-enrich already-enriched tracks
 ```
 
 Configure Discogs and MusicBrainz tokens in `~/.multidj/config.toml` under `[discogs]` and `[musicbrainz]`.
+
+**Genre hardening (pipeline `enrich_genre` step).** A layered decision tree fills each
+track's genre with provenance — `file → Discogs → MusicBrainz → CLAP zero-shot` — and records
+`genre_source` (`file`/`discogs`/`musicbrainz`/`clap`/`manual`) and `genre_confidence` on the
+track (migration 008). It runs in the enrich phase of `multidj pipeline`. Tracks with
+`genre_source = 'manual'` are never overwritten; the step is incremental (skips tracks that
+already have a `genre_source` unless `--force`). Skip it with `--skip-enrich-genre`.
 
 ### Standalone scripts
 
@@ -455,6 +518,19 @@ multidj dedupe --by filesize
 multidj dedupe --apply
 ```
 
+### Triage (requires `mpv`)
+
+Fast keyboard-driven track audition via an `mpv` subprocess:
+
+```bash
+multidj triage                   # audition the whole library
+multidj triage --crate "Genre:Techno"
+multidj triage --limit 50
+```
+
+Keys: KP0 = soft-delete, Shift+KP0 = hard-delete, KP1–5 = rating, n = skip, ←/→ = ±30s.
+Install mpv first (Fedora/RHEL: `sudo dnf install mpv`).
+
 ## Global flags
 
 | Flag | Effect |
@@ -487,59 +563,32 @@ MultiDJ owns `~/.multidj/library.sqlite`. Mixxx is a sync target, not a source.
 
 ## Project layout
 
+> **`CLAUDE.md` is the authoritative architecture reference** (layered module map, schema,
+> and design invariants). High-level summary:
+
 ```
 multidj/
-├── cli.py              — argparse entry point, global flag hoisting, subcommand dispatch
-├── config.py           — load/save ~/.multidj/config.toml, first-run prompt
-├── pipeline.py         — run_pipeline(): chains 11 steps including HTML report, single backup, step isolation
-├── report.py           — write_html_report(): static HTML dashboard from active track metrics
-├── db.py               — connect(), resolve_db_path(), migration runner
-├── backup.py           — create_backup() — timestamped copies to ~/.multidj/backups/
-├── models.py           — LibrarySummary dataclass
-├── utils.py            — emit() for JSON / human output
-├── constants.py        — genres, prefixes, regex patterns, CAMELOT_KEY_MAP, BPM_RANGES
-├── scan.py             — scan_library()
-├── audit.py            — audit_genres(), audit_metadata()
-├── clean.py            — clean_genres(), clean_text()
-├── analyze.py          — analyze_bpm(), analyze_key(), analyze_energy(), detect_*()
-├── parse.py            — parse_filename(), parse_library()
-├── enrich.py           — is_hebrew(), enrich_language()
-├── crates.py           — audit/hide/show/delete/rebuild_crates() with config-driven dimensions
-├── dedupe.py           — dedupe()
-├── embed.py            — CLAP audio encoding: analyze_embed(), find_similar(), store_embedding(), load_embeddings_from_db()
-├── cluster.py          — UMAP+HDBSCAN clustering: cluster_vibe(), cluster_embeddings(), name_cluster()
-├── adapters/
-│   ├── base.py         — SyncAdapter ABC
-│   ├── mixxx.py        — MixxxAdapter: import_all(), push_track(), full_sync() + crate sync
-│   └── directory.py    — DirectoryAdapter: import tracks from filesystem paths
-└── migrations/
-    ├── 001_initial.sql — MultiDJ schema v1
-    ├── 002_cue_points.sql — cue_points table
-    ├── 003_*.sql       — additional schema updates
-    └── 004_embeddings.sql — embeddings table (track_id PK, model_name, vector BLOB, created_at)
+├── cli.py                    — argparse entry point, global flag hoisting, subcommand dispatch
+├── pipeline.py               — run_pipeline(): 19 steps / 4 phases, single backup, step isolation
+├── config.py / db.py         — config.toml load/save; connect() + migration runner
+├── backup.py / utils.py      — timestamped backups; emit() JSON/human output
+├── constants.py / models.py  — genre lists, prefixes, CAMELOT_KEY_MAP; LibrarySummary
+├── scan.py / audit.py        — library stats; genre/metadata audits
+├── clean.py / parse.py       — text+genre normalization; filename parsing
+├── analyze.py                — analyze_bpm(), analyze_key(), analyze_energy()
+├── embed.py / embed_clamp3.py — CLAP + CLaMP3 audio embedding backends
+├── cluster.py / suggest.py   — UMAP+HDBSCAN Vibe/ crates; DJ next-track ranking
+├── cues.py                   — structural cue detection (intro/drop/outro)
+├── enrich.py / enrich_genre.py — file→Discogs→MusicBrainz metadata; layered genre hardening
+├── mixxx_blobs.py            — BeatGrid-2.0 + KeyMap-1.0 protobuf BLOB writer
+├── import_mixxx_analysis.py  — one-way pull of Mixxx's own BPM/key into MultiDJ
+├── crates.py / dedupe.py     — auto-crate rebuild; duplicate detection
+├── triage.py / report.py     — mpv audition; HTML dashboard
+├── adapters/                 — base.py (SyncAdapter ABC), mixxx.py, directory.py
+└── migrations/               — 001…008 SQL, auto-applied in order on write connections
 
-tests/
-├── conftest.py
-├── fixtures/
-│   ├── data.py              — canonical TRACKS/CRATES test data (10 tracks)
-│   ├── mixxx_factory.py
-│   └── multidj_factory.py
-├── test_import.py
-├── test_import_directory.py
-├── test_sync.py
-├── test_scan.py
-├── test_audit.py
-├── test_clean.py
-├── test_parse.py
-├── test_enrich.py
-├── test_crates.py
-├── test_dedupe.py
-├── test_analyze.py
-├── test_analyze_energy.py
-├── test_config.py
-├── test_mixxx_crate_sync.py
-├── test_pipeline.py
-└── test_safety.py
+scripts/                      — standalone HTML tools: viz_library.py, diagnostics.py, genre_detect.py
+tests/                        — full suite (386 tests); fixtures build fresh SQLite DBs per test
 ```
 
 ## Run tests
@@ -558,6 +607,20 @@ pytest tests/test_pipeline.py -v   # single module
 | `~/.multidj/backups/` | Timestamped backups |
 | `~/.mixxx/mixxxdb.sqlite` | Mixxx DB (read on import, written on sync) |
 | `~/.cache/huggingface/hub/models--laion--larger_clap_music/` | CLAP model weights (~1.5 GB, downloaded once on first `analyze embed --apply`) |
+
+## Repository Sync Note (2026-06-25)
+
+- **Pipeline restructured into 4 phases / 19 steps** (ingest → analyze → enrich → sync), each
+  independently runnable via `--phase`. `--skip-<step>` flags are available for every step.
+  (Supersedes the "10 steps" / "14 steps" counts in the older notes below.)
+- **Genre hardening:** new `enrich_genre` step + migration 008 (`genre_source`,
+  `genre_confidence`) — layered file→Discogs→MusicBrainz→CLAP with provenance.
+- **Cue → Mixxx sync:** intro/drop/outro pushed to hot-cue slots 0/1/2; MultiDJ never deletes
+  Mixxx hot cues (`cues clear` clears the MultiDJ DB only).
+- **BPM into Mixxx:** sync now fills `library.bpm` when Mixxx has none (a known-unstable
+  stopgap). The reliable path remains `analyze bpm` → `analyze mixxx-blobs` (BeatGrid BLOB);
+  `mixxx_blobs` logs per-track SKIPPED/WROTE for observability.
+- **Branches consolidated:** all work lives on `dev` (mirrored to `master`).
 
 ## Repository Sync Note (2026-06-03)
 
