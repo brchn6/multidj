@@ -435,11 +435,12 @@ class MixxxAdapter(SyncAdapter):
         else:
             filetype = filetype.split("/")[-1]
 
+        bpm = track.get("bpm") or None
         mixxx_conn.execute(
             """INSERT INTO library
                (artist, title, album, genre, rating, timesplayed, location,
-                duration, mixxx_deleted, header_parsed, filetype)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?)""",
+                duration, bpm, mixxx_deleted, header_parsed, filetype)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?)""",
             (
                 track.get("artist"),
                 track.get("title"),
@@ -449,6 +450,7 @@ class MixxxAdapter(SyncAdapter):
                 track.get("play_count", 0),
                 loc_id,
                 duration,
+                bpm,
                 filetype,
             ),
         )
@@ -514,6 +516,19 @@ class MixxxAdapter(SyncAdapter):
 
         if not updated:
             return False
+
+        # Fill BPM only when Mixxx currently has none — never overwrite valid analysis.
+        bpm = track.get("bpm")
+        if bpm and float(bpm) > 0:
+            mixxx_conn.execute(
+                """UPDATE library SET bpm = ?
+                   WHERE id=(
+                       SELECT l.id FROM library l
+                       JOIN track_locations tl ON l.location = tl.id
+                       WHERE tl.location = ?
+                   ) AND (bpm IS NULL OR bpm = 0)""",
+                (float(bpm), path),
+            )
 
         self._sync_cover_art(path, mixxx_conn)
 
@@ -651,8 +666,6 @@ class MixxxAdapter(SyncAdapter):
                     mdj_conn.commit()
 
                 crate_result = _push_crates_to_mixxx(mdj_conn, mixxx_conn)
-                # Reconcile cue hot cue slots 0/1/2 — MultiDJ is source of truth
-                mixxx_conn.execute("DELETE FROM cues WHERE hotcue IN (0, 1, 2)")
                 cue_result = _push_cues_to_mixxx(mdj_conn, mixxx_conn)
                 mixxx_conn.commit()
         finally:
