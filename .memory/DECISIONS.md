@@ -270,6 +270,81 @@ Tradeoff: ~800 KB HTML for 1674 tracks. Acceptable.
 
 ---
 
+## 2026-06-25 — MultiDJ never deletes hot cues from Mixxx
+
+**Decision:** Removed the global `DELETE FROM cues WHERE hotcue IN (0,1,2)` that previously
+ran before `_push_cues_to_mixxx()` on every sync. MultiDJ now only writes/replaces the
+specific slots it manages (0/1/2); it never deletes anything from the Mixxx cues table.
+
+**Why:** The user uses Mixxx's own custom keyboard shortcuts to audition and mark tracks.
+Hot cues placed in Mixxx (by MultiDJ or manually) must never be wiped by a sync run.
+`cues clear --apply` removes cues from the MultiDJ DB only; Mixxx cues persist.
+
+**Consequence:** Running `multidj cues clear --apply` followed by `sync mixxx --apply` will
+NOT remove cues from Mixxx. This is intentional. Auto-cues Phase 2 (read-before-write
+skip-occupied, 3→8 slots) remains to be built.
+
+---
+
+## 2026-06-25 — No triage command; Mixxx keyboard shortcuts are the audition tool
+
+**Decision:** `multidj triage` (mpv-based audition) was permanently removed. All files
+deleted: `triage.py`, `test_triage.py`, `assets/triage.lua`. CLI unwired.
+
+**Why:** The user built their own Mixxx fast keyboard shortcuts for track audition.
+Running a separate program (mpv) adds friction and complexity that isn't needed.
+Mixxx already handles audition natively.
+
+**Consequence:** Do not re-add triage under any name or form. If it reappears via a branch
+merge, delete it again immediately.
+
+---
+
+## 2026-06-25 — BPM stopgap committed but remains unstable (not solved)
+
+**Decision:** `sync mixxx` now fills Mixxx's `library.bpm` column when it is NULL/0, and
+`_ensure_track_in_mixxx` includes `bpm` on INSERT. This is a deliberate stopgap, isolated
+in commit `8fe23be` for easy revert.
+
+**Why:** Writing BPM to Mixxx without a BeatGrid-2.0 BLOB is unstable — Mixxx
+cross-validates and may show the value inconsistently. The correct path is
+`analyze bpm` → `analyze mixxx-blobs`. The stopgap was kept rather than reverted because
+"don't lose anything" was the consolidation goal; it is explicitly labelled as unstable.
+
+**Consequence:** BPM display in Mixxx may still be unreliable for tracks that went through
+sync only (no mixxx-blobs). The BeatGrid BLOB route remains the only reliable solution.
+The `mixxx_blobs` step now logs per-track SKIPPED/WROTE to make the protection observable.
+
+---
+
+## 2026-06-25 — Pipeline restructured: 4 phases / 19 steps
+
+**Decision:** `run_pipeline()` reorganized into a `PHASES` dict:
+- ingest: import, dedupe, fix_mismatches, parse
+- analyze: mixxx_import, bpm, key, mixxx_blobs, energy, embed, cues
+- enrich: clean_text, enrich_meta, enrich_genre, clean_genres
+- sync: cluster, crates, sync, report
+
+`--phase <name>` runs a single phase. `--skip-<step>` flags per step.
+Flagless `multidj pipeline --apply` still runs all 19 steps.
+
+**Why:** The previous flat 17-step order was hard to partially run and had no logical
+grouping. The 4-phase structure makes the pipeline's intent explicit and allows targeted
+re-runs (e.g. `--phase sync` to just push crates after manual edits).
+
+---
+
+## 2026-06-25 — Genre hardening with provenance tracking
+
+**Decision:** New `enrich_genre.py` module + migration 008 (`genre_source`, `genre_confidence`).
+Decision tree per track: file tags → Discogs → MusicBrainz → CLAP zero-shot.
+`genre_source='manual'` is never overwritten. Incremental by default.
+
+**Why:** Genre data in the library is inconsistent (missing, uninformative, or wrong).
+Tracking the source makes it possible to understand confidence and re-enrich selectively.
+
+---
+
 ## Summary of Key Constants
 
 | Constant | Value | Established |

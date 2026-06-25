@@ -404,26 +404,69 @@ Branch `feat/clamp3-integration` deleted after successful merge.
 
 ---
 
-## Current Status (2026-06-20)
+## 2026-06-25 — Pipeline Restructure, Genre Hardening, Consolidation
+
+**Branch consolidation:** All work merged onto single `dev` branch (mirrored to `master`).
+Both pushed to origin. `feature/pipeline-restructure-genre-hardening` worktree deleted after
+merge. All four refs at `cb3a775`. **370 tests passing, 0 failures.**
+
+**Pipeline restructured — 4 phases / 19 steps:**
+```
+Phase 1 INGEST   import → dedupe → fix_mismatches → parse
+Phase 2 ANALYZE  mixxx_import → bpm → key → mixxx_blobs → energy → embed → cues
+Phase 3 ENRICH   clean_text → enrich_meta → enrich_genre → clean_genres
+Phase 4 SYNC     cluster → crates → sync → report
+```
+- `--phase ingest|analyze|enrich|sync` runs a single phase
+- `--skip-<step>` flags for every step (flagless default still works)
+
+**Genre hardening shipped:**
+- Migration 008: `genre_source` + `genre_confidence` columns on `tracks`
+- `multidj/enrich_genre.py`: decision tree — file → Discogs → MusicBrainz → CLAP zero-shot
+- `ELECTRONIC_GENRE_LABELS` in `constants.py` (25 genre labels for CLAP text scoring)
+- `genre_source='manual'` never overwritten; incremental by default
+
+**mixxx_blobs observability:** Per-track SKIPPED/WROTE logging so BPM/key protection is visible.
+
+**Cue-sync contract locked:** MultiDJ NEVER deletes hot cues from Mixxx. `cues clear` clears
+MultiDJ DB only; Mixxx cues persist. Global DELETE removed.
+
+**BPM stopgap committed (isolated):** `sync mixxx` now fills `library.bpm` when Mixxx has
+none — known-unstable (no BeatGrid BLOB). Isolated in commit `8fe23be` for easy revert.
+Reliable path remains `analyze bpm` → `analyze mixxx-blobs`. **BPM into Mixxx still unsolved.**
+
+**triage permanently removed:** `triage.py`, `test_triage.py`, `assets/triage.lua`, CLI
+wiring all deleted. User uses Mixxx custom keyboard shortcuts for audition. Do not re-add.
+
+**README + CLAUDE.md + .memory refreshed** to reflect all of the above.
+
+---
+
+## Current Status (2026-06-25)
 
 | Phase | Feature | Status |
 |---|---|---|
 | 0–4 | Migration, schema, core CLI | Complete |
-| 5 | pipeline command (8→17 steps) | Complete |
+| 5 | pipeline command (4 phases / 19 steps + --phase flag) | Complete |
 | 6 | import directory | Complete |
 | 7 | BPM/key/energy analysis | Complete |
 | 8 | Metadata enrichment (file tags + Discogs + MusicBrainz) | Complete |
-| 8b | Mixxx pre-analysis BLOBs (BeatGrid + KeyMap) | Complete |
+| 8b | Mixxx pre-analysis BLOBs (BeatGrid + KeyMap); SKIPPED/WROTE logging | Complete |
 | 12 | CLAP embeddings + UMAP/HDBSCAN clustering | Complete |
 | 12b | CLaMP3 embedding backend | Complete |
-| 13 | Cue detection (allin1 + librosa) | Complete |
-| 16 | Triage player (mpv) | Complete |
+| 13 | Cue detection (allin1 + librosa); Mixxx hot-cue self-annotation (slots 0/1/2) | Complete |
+| 13b | Genre hardening (enrich_genre, genre_source/confidence, migration 008) | Complete |
+| 16 | Triage player (mpv) | **REMOVED** — user uses Mixxx keyboard shortcuts |
 | — | DJ next-track suggestion | Complete |
 | — | Library UMAP visualization | Complete |
 | — | Data science diagnostics dashboard | Complete |
 | — | Zero-shot genre detection | Complete |
+| — | Reliable BPM → Mixxx (BeatGrid BLOB route) | **NOT SOLVED** ⚠️ |
+| — | Auto-cues Phase 2 (read-before-write, 8 slots) | Not started |
+| — | MCP server | Not started |
+| — | Rekordbox / Serato adapters | Not started |
 
-**Test count:** 366 (2026-06-20)
-**Branch:** dev
-**DB:** `~/.multidj/library.sqlite` (real: Dropbox path via config.toml)
+**Test count:** 370 (2026-06-25, 0 failures)
+**Branch:** `dev` = `master` = `origin/dev` = `origin/master` = `cb3a775`
+**DB:** `~/.multidj/library.sqlite` → real: Dropbox path via `[mixxx].path` in config.toml
 **Real library:** ~3489 active tracks, ~1674 with CLAP embeddings
