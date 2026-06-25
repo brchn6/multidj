@@ -477,30 +477,29 @@ from multidj.pipeline import run_pipeline
 
 
 def test_pipeline_includes_enrich_step(multidj_db):
-    """Pipeline result must include an 'enrich' step."""
+    """Pipeline result must include an 'enrich_meta' step."""
     with patch("multidj.enrich.read_file_tags", return_value={}), \
          patch("multidj.enrich.search_discogs", return_value=None), \
          patch("multidj.enrich.search_musicbrainz", return_value=None):
         result = run_pipeline(db_path=str(multidj_db), apply=False)
     step_names = [s["step"] for s in result["steps"]]
-    assert "enrich" in step_names
+    assert "enrich_meta" in step_names
 
 
 def test_pipeline_skip_enrich(multidj_db):
-    """--skip-enrich must skip the enrich step."""
-    result = run_pipeline(db_path=str(multidj_db), apply=False, skip={"enrich"})
-    enrich_steps = [s for s in result["steps"] if s["step"] == "enrich"]
+    """--skip-enrich_meta must skip the enrich_meta step."""
+    result = run_pipeline(db_path=str(multidj_db), apply=False, skip={"enrich_meta"})
+    enrich_steps = [s for s in result["steps"] if s["step"] == "enrich_meta"]
     assert enrich_steps[0]["status"] == "skipped"
 
 
 def test_pipeline_enrich_before_dedupe(multidj_db):
-    """enrich must appear after parse and before dedupe."""
+    """enrich_meta must appear after dedupe in the new phase structure."""
     with patch("multidj.enrich.read_file_tags", return_value={}), \
          patch("multidj.enrich.search_discogs", return_value=None), \
          patch("multidj.enrich.search_musicbrainz", return_value=None):
         result = run_pipeline(db_path=str(multidj_db), apply=False)
     step_names = [s["step"] for s in result["steps"]]
-    enrich_idx = step_names.index("enrich")
-    parse_idx = step_names.index("parse")
+    enrich_idx = step_names.index("enrich_meta")
     dedupe_idx = step_names.index("dedupe")
-    assert parse_idx < enrich_idx < dedupe_idx
+    assert dedupe_idx < enrich_idx
