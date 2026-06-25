@@ -169,6 +169,8 @@ def search_discogs(
     threshold: float = _SCORE_THRESHOLD,
 ) -> dict[str, Any] | None:
     """Search Discogs for artist+title. Returns metadata dict or None if no confident match."""
+    if client is None:
+        return None
     time.sleep(2.5)  # 25 req/min rate limit
     try:
         results = client.search(f"{artist} {title}", type="release")

@@ -95,8 +95,10 @@ def enrich_genre(
         "user_agent", "multidj/1.0"
     )
 
+    with connect(db_path, readonly=False) as _guard:
+        ensure_not_empty(_guard)
+
     with connect(db_path, readonly=True) as conn:
-        ensure_not_empty(conn)
         if force:
             where = "deleted = 0 AND (genre_source IS NULL OR genre_source != 'manual')"
         else:
@@ -154,7 +156,7 @@ def enrich_genre(
         except Exception as exc:
             errors.append({"track_id": track_id, "artist": artist, "title": title, "error": str(exc)})
 
-    clap_needed = [(i, u[3]) for i, u in enumerate(updates) if u == (None, None, None, u[3])]
+    clap_needed = [(i, u[3]) for i, u in enumerate(updates) if u[:3] == (None, None, None)]
 
     if clap_needed:
         track_ids = [tid for _, tid in clap_needed]
