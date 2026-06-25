@@ -29,3 +29,14 @@ def test_embeddings_table_created(tmp_path):
     tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     raw.close()
     assert "embeddings" in tables
+
+def test_migration_008_adds_genre_columns(tmp_path):
+    from multidj.db import connect
+    db = tmp_path / "library.sqlite"
+    with connect(str(db), readonly=False) as conn:
+        pass  # migrations apply on connect
+    raw = sqlite3.connect(str(db))
+    cols = {r[1] for r in raw.execute("PRAGMA table_info(tracks)").fetchall()}
+    raw.close()
+    assert "genre_source" in cols
+    assert "genre_confidence" in cols
