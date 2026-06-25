@@ -358,3 +358,52 @@ def test_pipeline_embed_cluster_skipped_via_config(multidj_db):
     cluster_step = next(s for s in result["steps"] if s["step"] == "cluster")
     assert embed_step["status"] == "skipped"
     assert cluster_step["status"] == "skipped"
+
+
+def test_phase_ingest_skips_analyze_enrich_sync(multidj_db, mixxx_db, cfg, tmp_path):
+    """--phase ingest runs only ingest steps; analyze/enrich/sync are all skipped."""
+    result = run_pipeline(
+        db_path=str(multidj_db),
+        mixxx_db_path=str(mixxx_db),
+        cfg=cfg,
+        apply=False,
+        music_dir=str(tmp_path),
+        phase="ingest",
+        report_output=str(tmp_path / "r.html"),
+    )
+    ingest = {"import", "dedupe", "fix_mismatches", "parse"}
+    non_ingest = {"mixxx_import", "bpm", "key", "mixxx_blobs", "energy", "embed", "cues",
+                  "clean_text", "enrich_meta", "enrich_genre", "clean_genres",
+                  "cluster", "crates", "sync", "report"}
+    for name in ingest:
+        s = next(s for s in result["steps"] if s["step"] == name)
+        assert s["status"] != "skipped", f"{name} should run in ingest phase"
+    for name in non_ingest:
+        s = next(s for s in result["steps"] if s["step"] == name)
+        assert s["status"] == "skipped", f"{name} should be skipped in ingest phase"
+
+
+def test_phase_invalid_name_skips_everything(multidj_db, cfg, tmp_path):
+    """Unknown phase name results in all steps being skipped."""
+    result = run_pipeline(
+        db_path=str(multidj_db),
+        cfg=cfg,
+        apply=False,
+        phase="nonexistent",
+        report_output=str(tmp_path / "r.html"),
+    )
+    for s in result["steps"]:
+        assert s["status"] == "skipped"
+
+
+def test_cli_pipeline_phase_flag(multidj_db, tmp_path):
+    """CLI accepts --phase flag and passes it to run_pipeline."""
+    import sys
+    from multidj.cli import main as cli_main
+    rc = cli_main([
+        "--db", str(multidj_db),
+        "pipeline",
+        "--phase", "ingest",
+        "--skip-import",
+    ])
+    assert rc == 0

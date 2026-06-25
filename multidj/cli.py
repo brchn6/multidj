@@ -437,6 +437,13 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Disable HTML report generation")
     p_pipeline.add_argument("--limit",                 type=int, default=None,
                             help="Cap number of tracks processed per step")
+    p_pipeline.add_argument(
+        "--phase",
+        choices=["ingest", "analyze", "enrich", "sync"],
+        default=None,
+        dest="phase",
+        help="Run only the specified pipeline phase (ingest|analyze|enrich|sync)",
+    )
 
     # ── report ───────────────────────────────────────────────────────────────
     report_p = sub.add_parser("report", help="Generate library reports")
@@ -772,14 +779,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_import:          skip.add("import")
         if args.skip_fix_mismatches:  skip.add("fix_mismatches")
         if args.skip_parse:           skip.add("parse")
-        if args.skip_enrich:          skip.add("enrich")
+        if args.skip_enrich:          skip.add("enrich_meta")
         if args.skip_bpm:             skip.add("bpm")
         if args.skip_key:             skip.add("key")
         if args.skip_energy:          skip.add("energy")
         if args.skip_embed:           skip.add("embed")
         if args.skip_cluster:         skip.add("cluster")
         if args.skip_cues:            skip.add("cues")
-        if args.skip_genres:          skip.add("genres")
+        if args.skip_genres:          skip.add("clean_genres")
         if args.skip_clean_text:      skip.add("clean_text")
         if args.skip_crates:          skip.add("crates")
         if args.skip_sync:            skip.add("sync")
@@ -794,6 +801,7 @@ def main(argv: list[str] | None = None) -> int:
             apply=args.apply,
             music_dir=music_dir,
             skip=skip,
+            phase=args.phase,
             report_output=args.report_output,
             skip_report=args.skip_report,
             limit=args.limit,
