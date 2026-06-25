@@ -398,12 +398,23 @@ def test_phase_invalid_name_skips_everything(multidj_db, cfg, tmp_path):
 
 def test_cli_pipeline_phase_flag(multidj_db, tmp_path):
     """CLI accepts --phase flag and passes it to run_pipeline."""
-    import sys
     from multidj.cli import main as cli_main
     rc = cli_main([
         "--db", str(multidj_db),
         "pipeline",
         "--phase", "ingest",
         "--skip-import",
+    ])
+    assert rc == 0
+
+
+def test_cli_skip_enrich_maps_to_enrich_meta(multidj_db, tmp_path):
+    """--skip-enrich CLI flag correctly skips the enrich_meta pipeline step."""
+    from multidj.cli import main as cli_main
+    rc = cli_main([
+        "--db", str(multidj_db),
+        "pipeline",
+        "--skip-import",
+        "--skip-enrich",
     ])
     assert rc == 0
