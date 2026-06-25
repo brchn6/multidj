@@ -87,13 +87,31 @@ def test_sync_cue_positions_in_sample_frames(multidj_db, mixxx_db, tmp_path):
     assert drop_row[0] == pytest.approx(90.0 * 44100, rel=0.01)
 
 
-def test_sync_reconciles_stale_cues(multidj_db, mixxx_db, tmp_path):
-    """After clear_cues, old Mixxx hot cue slots are removed on next sync."""
+def test_sync_never_deletes_mixxx_hot_cues(multidj_db, mixxx_db, tmp_path):
+    """MultiDJ never deletes hot cues from Mixxx — even after clear_cues.
+
+    MultiDJ self-annotates intro/drop/outro into Mixxx but treats Mixxx hot
+    cues as write-only: it pushes/replaces the slots it manages and never wipes
+    the Mixxx cues table. Clearing cues in the MultiDJ DB (`cues clear`) removes
+    them from MultiDJ only; the cues already written into Mixxx persist so the
+    DJ's prepped hot cues (and any manual ones) are never destroyed.
+
+    The old behavior — a global `DELETE FROM cues WHERE hotcue IN (0,1,2)` that
+    reconciled stale slots on every sync — was removed per the auto-cues design
+    (never destroy work in Mixxx).
+    """
     _populate_cues(multidj_db, tmp_path)
 
     from multidj.adapters.mixxx import MixxxAdapter
     adapter = MixxxAdapter(mixxx_db_path=str(mixxx_db))
     adapter.full_sync(multidj_db_path=multidj_db, apply=True)
+
+    conn = sqlite3.connect(str(mixxx_db))
+    pushed = conn.execute(
+        "SELECT COUNT(*) FROM cues WHERE label IN ('Intro','Drop','Outro')"
+    ).fetchone()[0]
+    conn.close()
+    assert pushed > 0  # intro/drop/outro were annotated into Mixxx
 
     from multidj.cues import clear_cues
     clear_cues(db_path=str(multidj_db), apply=True)
@@ -106,4 +124,5 @@ def test_sync_reconciles_stale_cues(multidj_db, mixxx_db, tmp_path):
     ).fetchone()[0]
     conn.close()
 
-    assert remaining == 0
+    # Clearing MultiDJ cues must NOT remove the cues already written to Mixxx.
+    assert remaining == pushed
