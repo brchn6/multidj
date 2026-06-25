@@ -227,3 +227,5 @@ def test_returns_expected_summary_keys(multidj_db):
     assert "total_candidates" in result
     assert "applied" in result
     assert "errors" in result
+    assert "would_apply" in result
+    assert "error_details" in result
