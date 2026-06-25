@@ -315,8 +315,8 @@ def test_pipeline_skip_cues(multidj_db, tmp_path):
     assert cues_step["status"] == "skipped"
 
 
-def test_pipeline_cues_after_cluster(multidj_db):
-    """cues step comes after cluster (embed → cluster → cues ordering)."""
+def test_pipeline_cues_before_cluster(multidj_db):
+    """cues step (Phase 2 ANALYZE) comes before cluster (Phase 4 SYNC)."""
     from multidj.pipeline import run_pipeline
     from unittest.mock import patch
 

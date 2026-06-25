@@ -75,6 +75,10 @@ def run_pipeline(
         skip = skip | {"cues"}
     if not cfg.get("pipeline", {}).get("mixxx_blobs", True):
         skip = skip | {"mixxx_blobs"}
+    if not cfg.get("pipeline", {}).get("embed", True):
+        skip = skip | {"embed"}
+    if not cfg.get("pipeline", {}).get("cluster", True):
+        skip = skip | {"cluster"}
     if skip_report:
         skip = skip | {"report"}
 
@@ -165,12 +169,6 @@ def run_pipeline(
         db_path=db_path, apply=apply, backup_dir=False, limit=limit,
     ))
 
-    # Auto-skip embed/cluster if disabled in config
-    if not cfg.get("pipeline", {}).get("embed", True):
-        skip = skip | {"embed"}
-    if not cfg.get("pipeline", {}).get("cluster", True):
-        skip = skip | {"cluster"}
-
     def _run_embed(**kwargs):
         try:
             from .embed import analyze_embed as _ae
@@ -203,16 +201,17 @@ def run_pipeline(
     ))
 
     from .config import get_enrich_config as _gec
+    _enrich_cfg = _gec(cfg)
     steps.append(_run_step(
         "enrich_meta", _enrich_metadata,
         db_path=db_path, apply=apply, limit=limit,
-        enrich_cfg=_gec(cfg), backup_dir=False,
+        enrich_cfg=_enrich_cfg, backup_dir=False,
     ))
 
     steps.append(_run_step(
         "enrich_genre", _enrich_genre,
         db_path=db_path, apply=apply, limit=limit,
-        enrich_cfg=_gec(cfg),
+        enrich_cfg=_enrich_cfg,
     ))
 
     steps.append(_run_step(
