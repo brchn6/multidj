@@ -36,7 +36,7 @@ def test_dry_run_returns_step_summaries(multidj_db, mixxx_db, cfg, tmp_path):
     )
     assert result["mode"] == "dry_run"
     assert "steps" in result
-    assert len(result["steps"]) == 17
+    assert len(result["steps"]) == 19
     step_names = [s["step"] for s in result["steps"]]
     assert "fix_mismatches" in step_names
     assert "clean_text" in step_names
@@ -251,7 +251,7 @@ def test_pipeline_report_step_is_read_only(multidj_db, cfg, tmp_path):
         cfg=cfg,
         apply=True,
         music_dir=None,
-        skip={"import", "fix_mismatches", "parse", "dedupe", "bpm", "key", "energy", "cues", "genres", "clean_text", "crates", "sync"},
+        skip={"import", "fix_mismatches", "parse", "dedupe", "bpm", "key", "energy", "cues", "clean_genres", "clean_text", "crates", "sync", "enrich_genre"},
         report_output=str(report_path),
         backup_dir=False,
     )
@@ -315,8 +315,8 @@ def test_pipeline_skip_cues(multidj_db, tmp_path):
     assert cues_step["status"] == "skipped"
 
 
-def test_pipeline_cues_after_cluster(multidj_db):
-    """cues step comes after cluster (embed → cluster → cues ordering)."""
+def test_pipeline_cues_before_cluster(multidj_db):
+    """cues step (Phase 2 ANALYZE) comes before cluster (Phase 4 SYNC)."""
     from multidj.pipeline import run_pipeline
     from unittest.mock import patch
 
@@ -330,7 +330,7 @@ def test_pipeline_cues_after_cluster(multidj_db):
     step_names = [s["step"] for s in result["steps"]]
     cluster_idx = step_names.index("cluster")
     cues_idx = step_names.index("cues")
-    assert cues_idx == cluster_idx + 1
+    assert cues_idx < cluster_idx
 
 
 def test_pipeline_embed_cluster_steps_present(multidj_db):
@@ -339,7 +339,7 @@ def test_pipeline_embed_cluster_steps_present(multidj_db):
         db_path=str(multidj_db),
         apply=False,
         skip={"import", "fix_mismatches", "parse", "dedupe", "bpm", "key", "energy",
-              "embed", "cluster", "cues", "genres", "clean_text", "crates", "sync", "report"},
+              "embed", "cluster", "cues", "clean_genres", "clean_text", "crates", "sync", "report"},
     )
     step_names = [s["step"] for s in result["steps"]]
     assert "embed" in step_names
@@ -352,9 +352,81 @@ def test_pipeline_embed_cluster_skipped_via_config(multidj_db):
     result = run_pipeline(
         db_path=str(multidj_db), apply=False, cfg=cfg,
         skip={"import", "fix_mismatches", "parse", "dedupe", "bpm",
-              "key", "energy", "cues", "genres", "clean_text", "crates", "sync", "report"},
+              "key", "energy", "cues", "clean_genres", "clean_text", "crates", "sync", "report"},
     )
     embed_step = next(s for s in result["steps"] if s["step"] == "embed")
     cluster_step = next(s for s in result["steps"] if s["step"] == "cluster")
     assert embed_step["status"] == "skipped"
     assert cluster_step["status"] == "skipped"
+
+
+def test_phase_ingest_skips_analyze_enrich_sync(multidj_db, mixxx_db, cfg, tmp_path):
+    """--phase ingest runs only ingest steps; analyze/enrich/sync are all skipped."""
+    result = run_pipeline(
+        db_path=str(multidj_db),
+        mixxx_db_path=str(mixxx_db),
+        cfg=cfg,
+        apply=False,
+        music_dir=str(tmp_path),
+        phase="ingest",
+        report_output=str(tmp_path / "r.html"),
+    )
+    ingest = {"import", "dedupe", "fix_mismatches", "parse"}
+    non_ingest = {"mixxx_import", "bpm", "key", "mixxx_blobs", "energy", "embed", "cues",
+                  "clean_text", "enrich_meta", "enrich_genre", "clean_genres",
+                  "cluster", "crates", "sync", "report"}
+    for name in ingest:
+        s = next(s for s in result["steps"] if s["step"] == name)
+        assert s["status"] != "skipped", f"{name} should run in ingest phase"
+    for name in non_ingest:
+        s = next(s for s in result["steps"] if s["step"] == name)
+        assert s["status"] == "skipped", f"{name} should be skipped in ingest phase"
+
+
+def test_phase_invalid_name_skips_everything(multidj_db, cfg, tmp_path):
+    """Unknown phase name results in all steps being skipped."""
+    result = run_pipeline(
+        db_path=str(multidj_db),
+        cfg=cfg,
+        apply=False,
+        phase="nonexistent",
+        report_output=str(tmp_path / "r.html"),
+    )
+    for s in result["steps"]:
+        assert s["status"] == "skipped"
+
+
+def test_cli_pipeline_phase_flag(multidj_db, tmp_path):
+    """CLI accepts --phase flag and passes it to run_pipeline."""
+    from multidj.cli import main as cli_main
+    rc = cli_main([
+        "--db", str(multidj_db),
+        "pipeline",
+        "--phase", "ingest",
+        "--skip-import",
+    ])
+    assert rc == 0
+
+
+def test_cli_skip_enrich_maps_to_enrich_meta(multidj_db, tmp_path):
+    """--skip-enrich CLI flag correctly skips the enrich_meta pipeline step."""
+    from multidj.cli import main as cli_main
+    rc = cli_main([
+        "--db", str(multidj_db),
+        "pipeline",
+        "--skip-import",
+        "--skip-enrich",
+    ])
+    assert rc == 0
+
+
+def test_cli_skip_enrich_genre_flag(multidj_db, tmp_path):
+    """--skip-enrich-genre CLI flag correctly skips the enrich_genre pipeline step."""
+    from multidj.cli import main as cli_main
+    rc = cli_main([
+        "--db", str(multidj_db),
+        "pipeline",
+        "--skip-import",
+        "--skip-enrich-genre",
+    ])
+    assert rc == 0

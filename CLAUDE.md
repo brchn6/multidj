@@ -32,7 +32,7 @@ Override the DB path: `--db <path>` flag or `MULTIDJ_DB_PATH` environment variab
 
 | Command | Description |
 |---|---|
-| `pipeline` | Primary daily workflow: chains all 17 steps; `--apply`, `--skip-<step>`, `--music-dir` |
+| `pipeline` | Primary daily workflow: chains all 19 steps in 4 phases (ingest→analyze→enrich→sync); `--apply`, `--skip-<step>`, `--music-dir`, `--phase ingest\|analyze\|enrich\|sync` |
 | `import mixxx` | One-time pull from `~/.mixxx/mixxxdb.sqlite` into MultiDJ DB |
 | `import mixxx-analysis` | Import Mixxx's own analysis results (BPM, key) into MultiDJ; `--apply`, `--force`, `--limit N` |
 | `import directory PATH` | Import audio files from a directory; `--apply`, `--no-backup` |
@@ -77,7 +77,7 @@ Override the DB path: `--db <path>` flag or `MULTIDJ_DB_PATH` environment variab
 4. **`utils.py`** — `emit(data, json_mode)` for unified JSON/human output
 5. **`constants.py`** — uninformative genre list, crate classifier prefixes (`Vibe/` included), regex patterns, `CAMELOT_KEY_MAP`, `KNOWN_ADAPTERS`
 6. **`config.py`** — `load_config()`, `save_config()`, `get_music_dir()`, `get_mixxx_db_path()`, `get_llm_config()`, `get_enrich_config()`; reads/writes `~/.multidj/config.toml`
-7. **`pipeline.py`** — `run_pipeline()`: 17 steps (import→fix_mismatches→parse→enrich→bpm→key→mixxx_blobs→energy→embed→cluster→cues→genres→clean_text→crates→sync→dedupe→report); one backup at start; per-step error isolation; lazy-imports embed/cluster/cues for graceful degradation
+7. **`pipeline.py`** — `run_pipeline()`: 19 steps across 4 phases (Phase 1 INGEST: import→dedupe→fix_mismatches→parse; Phase 2 ANALYZE: mixxx_import→bpm→key→mixxx_blobs→energy→embed→cues; Phase 3 ENRICH: clean_text→enrich_meta→enrich_genre→clean_genres; Phase 4 SYNC: cluster→crates→sync→report); `phase=` param runs a single phase; one backup at start; per-step error isolation; lazy-imports embed/cluster/cues for graceful degradation
 8. **`embed.py`** — dual-backend audio embedding: `analyze_embed()`, `find_similar()`, `store_embedding()`, `load_embeddings_from_db(model_name=)`; dispatches on `model="clap"|"clamp3"`; CLAP uses `laion/larger_clap_music` (512-dim, 3×30s windows); composite PK `(track_id, model_name)` allows both models per track
 9. **`embed_clamp3.py`** — CLaMP3 backend: `load_clamp3_model()`, `encode_audio_clamp3()`; MERT-v1-95M → non-overlapping 5s chunks → CLaMP3 SAAS encoder → 768-dim vector; requires `vendor/clamp3` submodule + `[clamp3]` extra. **Note:** CLaMP3 collapses audio-audio discrimination by design — use CLAP for clustering/similarity, CLaMP3 for future text→audio agent search
 10. **`suggest.py`** — DJ next-track ranking: `suggest_next()`; score = 0.70×cosine_sim + 0.15×bpm_compat + 0.15×camelot_key_compat; `_parse_camelot()` handles Camelot wheel + musical notation; filters to same `Vibe/` cluster by default
@@ -100,7 +100,7 @@ Override the DB path: `--db <path>` flag or `MULTIDJ_DB_PATH` environment variab
 **Migration system:** SQL files in `multidj/migrations/NNN_name.sql` auto-applied in numeric order on `connect(readonly=False)`. Schema version in `schema_version` table. **Critical:** `connect(readonly=True)` skips migrations — commands reading tables from recent migrations must open a write connection first.
 
 **MultiDJ DB schema** (`~/.multidj/library.sqlite`):
-- `tracks` — (`id`, `path`, `artist`, `title`, `album`, `genre`, `bpm`, `key`, `language`, `duration`, `filesize`, `rating`, `play_count`, `remixer`, `energy`, `intro_end`, `outro_start`, `release_year`, `label`, `deleted`, `created_at`, `updated_at`)
+- `tracks` — (`id`, `path`, `artist`, `title`, `album`, `genre`, `genre_source`, `genre_confidence`, `bpm`, `key`, `language`, `duration`, `filesize`, `rating`, `play_count`, `remixer`, `energy`, `intro_end`, `outro_start`, `release_year`, `label`, `deleted`, `created_at`, `updated_at`)
 - `track_tags` — arbitrary key/value metadata per track (`discogs_styles`, `discogs_primary_style`, `catalog_number`)
 - `crates` — named collections with `type` and `show` flag
 - `crate_tracks` — many-to-many join

@@ -88,3 +88,51 @@ class TestPackBeatgrid:
             assert abs(parsed - bpm) < 0.01, (
                 f"BPM round-trip failed: {bpm} → {parsed}"
             )
+
+
+def test_mixxx_blobs_logs_skipped_for_existing_beats(multidj_db, mixxx_db, tmp_path):
+    """analyze_mixxx_blobs logs SKIPPED when Mixxx already has a BeatGrid."""
+    import sqlite3
+    import sys
+    from io import StringIO
+
+    conn = sqlite3.connect(str(mixxx_db))
+    conn.execute("UPDATE library SET beats = ? WHERE id = 1", (b"fake_beats_blob",))
+    conn.commit()
+    conn.close()
+
+    captured = StringIO()
+    old_stderr = sys.stderr
+    sys.stderr = captured
+    try:
+        from multidj.mixxx_blobs import analyze_mixxx_blobs
+        analyze_mixxx_blobs(
+            multidj_db_path=str(multidj_db),
+            mixxx_db_path=str(mixxx_db),
+            apply=False,
+        )
+    finally:
+        sys.stderr = old_stderr
+    output = captured.getvalue()
+    assert "SKIPPED" in output
+
+
+def test_mixxx_blobs_logs_wrote_for_new_track(multidj_db, mixxx_db, tmp_path):
+    """analyze_mixxx_blobs logs WROTE when writing a new BeatGrid."""
+    import sys
+    from io import StringIO
+
+    captured = StringIO()
+    old_stderr = sys.stderr
+    sys.stderr = captured
+    try:
+        from multidj.mixxx_blobs import analyze_mixxx_blobs
+        analyze_mixxx_blobs(
+            multidj_db_path=str(multidj_db),
+            mixxx_db_path=str(mixxx_db),
+            apply=True,
+        )
+    finally:
+        sys.stderr = old_stderr
+    output = captured.getvalue()
+    assert "WROTE" in output
