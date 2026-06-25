@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `MultiDJ` (package: `multidj`) is a Python 3.9+ CLI for DJ music library management. It maintains its own SQLite DB (`~/.multidj/library.sqlite`) as the source of truth and syncs to DJ software (Mixxx first; Rekordbox/Serato as future adapters). All write commands are **dry-run by default**, automatic backups are created before any writes, and JSON output is available for machine consumption. Eventually exposed as an MCP server for agent-native access.
 
-All phases through Phase 16 are complete: migration (0–4), ingestion + pipeline (6–7), metadata enrichment (8), semantic embeddings + clustering (12/12b), cue detection (13), triage player (16), Mixxx pre-analysis BLOBs, CLaMP3 integration, DJ next-track suggestion, and library visualization.
+All major phases are complete: migration (0–4), ingestion + pipeline (6–7), metadata enrichment (8), semantic embeddings + clustering (12/12b), cue detection (13), Mixxx pre-analysis BLOBs, CLaMP3 integration, DJ next-track suggestion, and library visualization.
 
 ## Installation and Running
 
@@ -22,8 +22,6 @@ multidj import mixxx --apply      # one-time: populate MultiDJ DB from Mixxx
 multidj pipeline --apply          # daily workflow: import→parse→analyze→crates→sync
 multidj <command>                 # primary entry point
 mixxx-tool <command>              # legacy alias (same binary)
-# Optional: mpv media player (required for `multidj triage`)
-# Fedora/RHEL: sudo dnf install mpv
 ```
 
 Override the DB path: `--db <path>` flag or `MULTIDJ_DB_PATH` environment variable.
@@ -60,7 +58,6 @@ Override the DB path: `--db <path>` flag or `MULTIDJ_DB_PATH` environment variab
 | `crates hide/show/delete` | Bulk crate management |
 | `crates rebuild` | Rebuild auto-crates (Genre:/BPM:/Key:/Energy:/Lang:/Vibe/); `--apply`, `--min-tracks` |
 | `dedupe` | Duplicate detection (artist+title or filesize+duration) |
-| `triage` | Keyboard-driven track audition via mpv; KP0=soft-delete, Shift+KP0=hard-delete, KP1–5=rating, n=skip, ←/→=±30s; `--crate NAME`, `--limit N` |
 | `report dashboard` | Standalone interactive HTML dashboard; `--output PATH` |
 
 **Global flags** (accepted anywhere): `--json`, `--db <path>`, `--version`

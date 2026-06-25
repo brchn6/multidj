@@ -518,19 +518,6 @@ multidj dedupe --by filesize
 multidj dedupe --apply
 ```
 
-### Triage (requires `mpv`)
-
-Fast keyboard-driven track audition via an `mpv` subprocess:
-
-```bash
-multidj triage                   # audition the whole library
-multidj triage --crate "Genre:Techno"
-multidj triage --limit 50
-```
-
-Keys: KP0 = soft-delete, Shift+KP0 = hard-delete, KP1–5 = rating, n = skip, ←/→ = ±30s.
-Install mpv first (Fedora/RHEL: `sudo dnf install mpv`).
-
 ## Global flags
 
 | Flag | Effect |
@@ -583,7 +570,7 @@ multidj/
 ├── mixxx_blobs.py            — BeatGrid-2.0 + KeyMap-1.0 protobuf BLOB writer
 ├── import_mixxx_analysis.py  — one-way pull of Mixxx's own BPM/key into MultiDJ
 ├── crates.py / dedupe.py     — auto-crate rebuild; duplicate detection
-├── triage.py / report.py     — mpv audition; HTML dashboard
+├── report.py                 — HTML dashboard generator
 ├── adapters/                 — base.py (SyncAdapter ABC), mixxx.py, directory.py
 └── migrations/               — 001…008 SQL, auto-applied in order on write connections
 

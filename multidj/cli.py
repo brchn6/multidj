@@ -20,7 +20,6 @@ from .enrich import enrich_language, enrich_metadata
 from .parse import parse_library
 from .pipeline import run_pipeline
 from .report import write_dashboard_report
-from .triage import launch_session, tag_track
 from .scan import format_scan, scan_library
 from .utils import emit
 from .cues import analyze_cues as _analyze_cues, clear_cues as _clear_cues
@@ -454,21 +453,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", default="multidj_report.html",
                    help="Output HTML path (default: ./multidj_report.html)")
 
-    # ── triage ───────────────────────────────────────────────────────────────
-    triage_p = sub.add_parser("triage", help="Fast keyboard-driven track audition (requires mpv)")
-    triage_p.add_argument("--crate", default=None,
-                          help="Limit session to tracks in this named crate")
-    triage_p.add_argument("--limit", type=int, default=None,
-                          help="Cap number of tracks in the session")
-    triage_sub = triage_p.add_subparsers(dest="triage_target")
-    p_tag = triage_sub.add_parser("tag", help="Internal: write a triage decision (called by Lua)")
-    p_tag.add_argument("--path",        required=True,
-                       help="Absolute path to the audio file")
-    p_tag.add_argument("--rating",      type=int, required=True, choices=range(0, 6),
-                       help="0=trash (soft-delete or hard-delete), 1-5=quality rating")
-    p_tag.add_argument("--hard-delete", action="store_true", dest="hard_delete",
-                       help="Also remove the file from disk (only valid with --rating 0)")
-
     return parser
 
 
@@ -826,14 +810,6 @@ def main(argv: list[str] | None = None) -> int:
         else:
             parser.error("Unknown report command.")
             return 2
-
-    elif args.command == "triage":
-        if args.triage_target == "tag":
-            tag_track(args.db, args.path, args.rating, hard_delete=args.hard_delete)
-            return 0
-        else:
-            launch_session(args.db, crate=args.crate, limit=args.limit)
-            return 0
 
     elif args.command == "cues":
         if args.cues_target == "clear":
