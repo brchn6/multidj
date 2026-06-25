@@ -420,6 +420,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_pipeline.add_argument("--skip-fix-mismatches",  action="store_true", dest="skip_fix_mismatches")
     p_pipeline.add_argument("--skip-parse",            action="store_true", dest="skip_parse")
     p_pipeline.add_argument("--skip-enrich",           action="store_true", dest="skip_enrich")
+    p_pipeline.add_argument("--skip-enrich-genre", action="store_true", dest="skip_enrich_genre",
+                             help="Skip the enrich_genre step")
     p_pipeline.add_argument("--skip-bpm",              action="store_true", dest="skip_bpm")
     p_pipeline.add_argument("--skip-key",              action="store_true", dest="skip_key")
     p_pipeline.add_argument("--skip-energy",           action="store_true", dest="skip_energy")
@@ -780,6 +782,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_fix_mismatches:  skip.add("fix_mismatches")
         if args.skip_parse:           skip.add("parse")
         if args.skip_enrich:          skip.add("enrich_meta")
+        if args.skip_enrich_genre:    skip.add("enrich_genre")
         if args.skip_bpm:             skip.add("bpm")
         if args.skip_key:             skip.add("key")
         if args.skip_energy:          skip.add("energy")

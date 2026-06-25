@@ -130,8 +130,7 @@ def enrich_genre(
                 continue
 
             # Attempt web enrichment (force=True, or genre is uninformative/None).
-            # Always call search_discogs (passes None client when unconfigured;
-            # the real function handles NoneType client via try/except).
+            # search_discogs returns None immediately when client is None (no sleep, no I/O)
             if artist and title:
                 hit = search_discogs(artist, title, discogs_client)
                 if hit and hit.get("styles"):

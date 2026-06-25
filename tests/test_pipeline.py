@@ -418,3 +418,15 @@ def test_cli_skip_enrich_maps_to_enrich_meta(multidj_db, tmp_path):
         "--skip-enrich",
     ])
     assert rc == 0
+
+
+def test_cli_skip_enrich_genre_flag(multidj_db, tmp_path):
+    """--skip-enrich-genre CLI flag correctly skips the enrich_genre pipeline step."""
+    from multidj.cli import main as cli_main
+    rc = cli_main([
+        "--db", str(multidj_db),
+        "pipeline",
+        "--skip-import",
+        "--skip-enrich-genre",
+    ])
+    assert rc == 0
