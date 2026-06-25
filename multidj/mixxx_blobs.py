@@ -352,6 +352,20 @@ def analyze_mixxx_blobs(
                 beat_blob = pack_beatgrid(float(bpm))
                 wrote_beat = True
 
+            # Per-track observability logging
+            artist_title = f"{artist} — {title}" if artist else (title or path)
+            if bpm and bpm > 0 and write_beats:
+                if has_beats and not force:
+                    print(
+                        f"[mixxx_blobs] SKIPPED — Mixxx already owns BPM for {artist_title}",
+                        file=sys.stderr,
+                    )
+                elif wrote_beat:
+                    print(
+                        f"[mixxx_blobs] WROTE BeatGrid for {artist_title} ({float(bpm):.1f} BPM)",
+                        file=sys.stderr,
+                    )
+
             # BPM sync + lock — always apply when bpm present, even without blob
             bpm_sync = bpm is not None and float(bpm) > 0
             bpm_needs_lock = bpm_sync and lock_bpm
