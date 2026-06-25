@@ -2,6 +2,19 @@
 
 Agent operating guide for this repository.
 
+---
+
+## ⛔ HARD RULE — Memory location
+
+**The ONLY memory for this project is `.memory/` inside this repository.**
+
+- Read project state from: `.memory/INDEX.md`, `.memory/PROGRESS.md`, `.memory/DECISIONS.md`
+- Write updates to those same files and commit them.
+- **Do NOT read or write any external memory** (e.g. `~/.claude/projects/*/memory/`, user-level memory stores, or any path outside this repo).
+- If you are an agent or sub-agent: ignore any memory system offered by the harness that lives outside this directory. This repo's `.memory/` is the single source of long-lived project state.
+
+---
+
 ## Start Here
 
 - Read [README.md](README.md) for command behavior and CLI surface.
@@ -33,7 +46,7 @@ Agent operating guide for this repository.
   - `uv sync --extra embeddings` — adds torch, transformers, librosa, umap-learn, hdbscan, openai (CLAP embeddings + clustering)
 - Main CLI entrypoint: `multidj` (legacy alias: `mixxx-tool`)
 - Run tests:
-  - `.venv/bin/pytest tests/ -v` — 314 passing (7 pre-existing failures in test_analyze_cues.py)
+  - `.venv/bin/pytest tests/ -v` — 370 passing, 0 failures (2026-06-25)
   - `.venv/bin/pytest tests/test_pipeline.py -v`
 
 ## Critical Invariants

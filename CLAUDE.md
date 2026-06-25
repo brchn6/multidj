@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⛔ HARD RULE — Memory location
+
+**The ONLY memory for this project is `.memory/` inside this repository.**
+
+- Read project state from: `.memory/INDEX.md`, `.memory/PROGRESS.md`, `.memory/DECISIONS.md`
+- Write any session learnings, decisions, or status updates to those files and commit them.
+- **Do NOT read or write any external memory** outside this repo (e.g. `~/.claude/projects/*/memory/` or any harness-level memory store).
+- This applies to all agents, sub-agents, and Claude Code sessions working in this directory.
+
 ## Project Overview
 
 `MultiDJ` (package: `multidj`) is a Python 3.9+ CLI for DJ music library management. It maintains its own SQLite DB (`~/.multidj/library.sqlite`) as the source of truth and syncs to DJ software (Mixxx first; Rekordbox/Serato as future adapters). All write commands are **dry-run by default**, automatic backups are created before any writes, and JSON output is available for machine consumption. Eventually exposed as an MCP server for agent-native access.
