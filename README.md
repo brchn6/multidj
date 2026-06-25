@@ -67,9 +67,10 @@ multidj import directory ~/Music/All_Tracks --apply
 
 ## Daily workflow
 
+### Full pipeline (with BPM/key analysis)
+
 ```bash
-# Full pipeline: import new tracks → clean → analyze → rebuild crates → sync to Mixxx
-# (--music-dir and --mixxx-db come from ~/.multidj/config.toml automatically)
+# Reads music_dir and mixxx path from ~/.multidj/config.toml automatically
 multidj pipeline --apply
 
 # Dry-run first to preview what would change
@@ -85,6 +86,30 @@ multidj pipeline --apply \
 - No `--music-dir` and no `[pipeline].music_dir` → skip directory import step
 - No `--mixxx-db` and no `[mixxx].path` → skip Mixxx sync step
 
+### Quick scan + sync (no analysis)
+
+Pick up new files and push to Mixxx without running BPM/key/energy analysis:
+
+```bash
+multidj import directory --apply   # reads music_dir from config; imports new files + dedupes
+multidj sync mixxx --apply         # pushes all dirty tracks + crates to Mixxx
+```
+
+> BPM and key stored in Mixxx are never overwritten by the sync. Only artist, title, album, genre, rating, and play count are pushed. Crate membership is repopulated from MultiDJ.
+
+### BPM + key analysis for tracks Mixxx doesn't have
+
+The full pipeline handles this automatically — it imports Mixxx's existing analysis first, then only analyzes tracks with missing values. To run just these steps:
+
+```bash
+multidj import mixxx-analysis --apply   # pull Mixxx's existing BPM/key into MultiDJ
+multidj analyze bpm --apply             # detect BPM for tracks still missing it
+multidj analyze key --apply             # detect key for tracks still missing it
+multidj analyze mixxx-blobs --apply     # write BeatGrid + KeyMap BLOBs back to Mixxx
+```
+
+`analyze bpm` and `analyze key` skip tracks that already have values — use `--force` to reanalyze everything.
+
 ## The pipeline
 
 `multidj pipeline` chains all steps in order:
@@ -98,9 +123,11 @@ import directory → fix mismatches → parse → enrich metadata → analyze bp
 ```bash
 multidj pipeline --apply      # execute everything
 multidj pipeline              # dry-run: preview without writing
+```
 
-# Skip individual steps
-multidj pipeline --apply --skip-bpm --skip-key
+### Other flags
+
+```bash
 multidj pipeline --apply --skip-sync   # rebuild crates without touching Mixxx
 
 # Write report to custom path
@@ -108,17 +135,6 @@ multidj pipeline --apply --report-output /path/to/report.html
 
 # Disable report generation
 multidj pipeline --skip-report
-
-
-
-# Basic pipeline run (directory import + BPM/key/energy + crates + Mixxx sync, no embeddings/clustering)
-multidj pipeline --apply \
-  --music-dir '/home/barc/Weizmann Institute Dropbox/Bar Cohen/Music/' \
-  --mixxx-db '/home/barc/Weizmann Institute Dropbox/Bar Cohen/Music/mixxx/mixxxdb.sqlite' \
-  --skip-embed \
-  --skip-cluster
-
-
 ```
 
 ### Interactive Dashboard Report (auto-generated)
