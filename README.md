@@ -125,8 +125,8 @@ Phase 2 ANALYZE  mixxx_import → bpm → key → energy → embed → cues
 Phase 3 ENRICH   enrich_meta → enrich_genre → clean_genres
 Phase 4 SYNC     cluster → crates → sync → mixxx_blobs → report
 
-Phase quick      import → dedupe → clean_text → fix_mismatches → parse → crates → sync → mixxx_blobs → report
-                 (everyday workflow: no analysis, no enrichment, no clustering)
+Phase quick      import → dedupe → clean_text → fix_mismatches → parse → mixxx_import → crates → sync → mixxx_blobs → report
+                 (everyday workflow: pulls Mixxx's detected BPMs, syncs to Mixxx; no librosa analysis)
 ```
 
 ```bash
@@ -140,7 +140,7 @@ already processed, so it's safe to re-run daily. It takes a single backup at the
 ### Run a single phase
 
 ```bash
-multidj pipeline --apply --phase quick     # everyday: import + clean + sync (no analysis)
+multidj pipeline --apply --phase quick     # everyday: import + pull Mixxx BPMs + sync (no librosa)
 multidj pipeline --apply --phase ingest    # only import/dedupe/clean_text/fix_mismatches/parse
 multidj pipeline --apply --phase analyze   # only mixxx_import/bpm/key/energy/embed/cues
 multidj pipeline --apply --phase enrich    # only enrich_meta/enrich_genre/clean_genres

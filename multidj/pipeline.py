@@ -21,7 +21,7 @@ PHASES: dict[str, set[str]] = {
     "enrich":  {"enrich_meta", "enrich_genre", "clean_genres"},
     "sync":    {"cluster", "crates", "sync", "mixxx_blobs", "report"},
     "quick":   {"import", "dedupe", "clean_text", "fix_mismatches", "parse",
-                 "crates", "sync", "mixxx_blobs", "report"},
+                 "mixxx_import", "crates", "sync", "mixxx_blobs", "report"},
 }
 
 _ALL_STEPS: set[str] = set().union(*PHASES.values())
@@ -50,7 +50,7 @@ def run_pipeline(
     Phase 2 ANALYZE:  mixxx_import, bpm, key, energy, embed, cues
     Phase 3 ENRICH:   enrich_meta, enrich_genre, clean_genres
     Phase 4 SYNC:     cluster, crates, sync, mixxx_blobs, report
-    Phase quick:      import, dedupe, clean_text, fix_mismatches, parse, crates, sync, mixxx_blobs, report
+    Phase quick:      import, dedupe, clean_text, fix_mismatches, parse, mixxx_import, crates, sync, mixxx_blobs, report
 
     Pass phase='ingest'|'analyze'|'enrich'|'sync'|'quick' to run a single phase.
     Use 'quick' for the everyday workflow: import new files, clean names, sync to Mixxx.

@@ -395,8 +395,8 @@ def test_phase_quick_runs_ingest_and_sync_skips_analyze_enrich_cluster(multidj_d
         report_output=str(tmp_path / "r.html"),
     )
     quick_steps = {"import", "dedupe", "clean_text", "fix_mismatches", "parse",
-                   "crates", "sync", "mixxx_blobs", "report"}
-    skipped_steps = {"mixxx_import", "bpm", "key", "energy", "embed", "cues",
+                   "mixxx_import", "crates", "sync", "mixxx_blobs", "report"}
+    skipped_steps = {"bpm", "key", "energy", "embed", "cues",
                      "enrich_meta", "enrich_genre", "clean_genres", "cluster"}
     for name in quick_steps:
         s = next(s for s in result["steps"] if s["step"] == name)
