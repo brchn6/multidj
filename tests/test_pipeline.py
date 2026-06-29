@@ -383,6 +383,29 @@ def test_phase_ingest_skips_analyze_enrich_sync(multidj_db, mixxx_db, cfg, tmp_p
         assert s["status"] == "skipped", f"{name} should be skipped in ingest phase"
 
 
+def test_phase_quick_runs_ingest_and_sync_skips_analyze_enrich_cluster(multidj_db, mixxx_db, cfg, tmp_path):
+    """--phase quick runs ingest + crates/sync/report; skips all analysis, enrich, cluster."""
+    result = run_pipeline(
+        db_path=str(multidj_db),
+        mixxx_db_path=str(mixxx_db),
+        cfg=cfg,
+        apply=False,
+        music_dir=str(tmp_path),
+        phase="quick",
+        report_output=str(tmp_path / "r.html"),
+    )
+    quick_steps = {"import", "dedupe", "clean_text", "fix_mismatches", "parse",
+                   "crates", "sync", "report"}
+    skipped_steps = {"mixxx_import", "bpm", "key", "mixxx_blobs", "energy", "embed", "cues",
+                     "enrich_meta", "enrich_genre", "clean_genres", "cluster"}
+    for name in quick_steps:
+        s = next(s for s in result["steps"] if s["step"] == name)
+        assert s["status"] != "skipped", f"{name} should run in quick phase"
+    for name in skipped_steps:
+        s = next(s for s in result["steps"] if s["step"] == name)
+        assert s["status"] == "skipped", f"{name} should be skipped in quick phase"
+
+
 def test_phase_invalid_name_skips_everything(multidj_db, cfg, tmp_path):
     """Unknown phase name results in all steps being skipped."""
     result = run_pipeline(

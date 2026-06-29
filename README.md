@@ -88,12 +88,15 @@ multidj pipeline --apply \
 
 ### Quick scan + sync (no analysis)
 
-Pick up new files and push to Mixxx without running BPM/key/energy analysis:
+Pick up new files, clean names, and push to Mixxx without running BPM/key/energy analysis:
 
 ```bash
-multidj import directory --apply   # reads music_dir from config; imports new files + dedupes
-multidj sync mixxx --apply         # pushes all dirty tracks + crates to Mixxx
+multidj pipeline --apply --phase quick
 ```
+
+This runs: `import → dedupe → clean_text → fix_mismatches → parse → crates → sync → report`
+
+Skips all heavy steps: BPM/key/energy analysis, audio embeddings, cue detection, clustering, metadata enrichment.
 
 > Sync pushes artist, title, album, genre, rating, and play count, and repopulates crate membership from MultiDJ. It also fills **BPM only when Mixxx has none** (NULL/0) and never overwrites an existing Mixxx BPM. Key is never written by sync.
 >
@@ -121,6 +124,9 @@ Phase 1 INGEST   import → dedupe → clean_text → fix_mismatches → parse
 Phase 2 ANALYZE  mixxx_import → bpm → key → mixxx_blobs → energy → embed → cues
 Phase 3 ENRICH   enrich_meta → enrich_genre → clean_genres
 Phase 4 SYNC     cluster → crates → sync → report
+
+Phase quick      import → dedupe → clean_text → fix_mismatches → parse → crates → sync → report
+                 (everyday workflow: no analysis, no enrichment, no clustering)
 ```
 
 ```bash
@@ -134,6 +140,7 @@ already processed, so it's safe to re-run daily. It takes a single backup at the
 ### Run a single phase
 
 ```bash
+multidj pipeline --apply --phase quick     # everyday: import + clean + sync (no analysis)
 multidj pipeline --apply --phase ingest    # only import/dedupe/clean_text/fix_mismatches/parse
 multidj pipeline --apply --phase analyze   # only mixxx_import/bpm/key/mixxx_blobs/energy/embed/cues
 multidj pipeline --apply --phase enrich    # only enrich_meta/enrich_genre/clean_genres
@@ -150,7 +157,7 @@ multidj pipeline --apply --skip-sync   # rebuild crates without touching Mixxx
 # --skip-crates, --skip-sync, --skip-mixxx-blobs, --skip-report
 
 # Write report to custom path
-multidj pipeline --apply --report-output /path/to/report.html
+multidj pipeline --apply --report-output /tmp/report.html
 
 # Disable report generation
 multidj pipeline --skip-report
@@ -173,7 +180,7 @@ Default output:
 Options:
 
 ```bash
-multidj pipeline --report-output /path/to/report.html
+multidj pipeline --report-output /tmp/report.html
 multidj pipeline --skip-report
 ```
 
