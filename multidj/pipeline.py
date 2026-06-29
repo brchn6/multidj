@@ -67,10 +67,6 @@ def run_pipeline(
         skip = skip | {"bpm"}
     if not cfg.get("crates", {}).get("key", True):
         skip = skip | {"key"}
-    if not cfg.get("pipeline", {}).get("fix_mismatches", True):
-        skip = skip | {"fix_mismatches"}
-    if not cfg.get("pipeline", {}).get("clean_text", True):
-        skip = skip | {"clean_text"}
     if not cfg.get("pipeline", {}).get("cues", True):
         skip = skip | {"cues"}
     if not cfg.get("pipeline", {}).get("mixxx_blobs", True):

@@ -466,7 +466,26 @@ wiring all deleted. User uses Mixxx custom keyboard shortcuts for audition. Do n
 | — | MCP server | Not started |
 | — | Rekordbox / Serato adapters | Not started |
 
-**Test count:** 370 (2026-06-25, 0 failures)
-**Branch:** `dev` = `master` = `origin/dev` = `origin/master` = `cb3a775`
+**Test count:** 373 (2026-06-29, 0 failures)
+**Branch:** `dev` — local HEAD `f566594` (not yet pushed); `master`/`origin/dev` at `cb3a775`
 **DB:** `~/.multidj/library.sqlite` → real: Dropbox path via `[mixxx].path` in config.toml
 **Real library:** ~3489 active tracks, ~1674 with CLAP embeddings
+
+---
+
+## 2026-06-29 — Bracket Stripping + CLI Cleanup
+
+**What shipped:**
+
+**Universal bracket removal (`f566594`):**
+- `clean_title_noise()` and `clean_artist_noise()` now strip ALL content inside `()`, `[]`, `{}` from any position using `_ANY_BRACKET_GROUP_RE`. Previous behavior was selective (only trailing groups matching a noise-marker allowlist).
+- End goal: Mixxx shows clean track names. Flow: clean_text → sync_state dirty flag fires → sync mixxx → Mixxx `library.title`/`library.artist` updated.
+- `clean_text` moved from Phase 3 ENRICH to Phase 1 INGEST (after dedupe, before fix_mismatches → parse). Phases now: INGEST: `import→dedupe→clean_text→fix_mismatches→parse`; ENRICH: `enrich_meta→enrich_genre→clean_genres`.
+- 3 tests updated; 3 new tests added.
+
+**CLI flag cleanup:**
+- Removed `--skip-parse`, `--skip-fix-mismatches`, `--skip-clean-text`, `--skip-genres` from `pipeline` subcommand — these steps always run.
+- Removed `pipeline.fix_mismatches` and `pipeline.clean_text` config-based auto-skips from `pipeline.py`.
+- Note: `--skip-dedupe` never existed; dedupe was already always-on.
+- README "report-only run" section simplified to just `multidj report dashboard`.
+- Underlying Python `skip=` API in `run_pipeline()` preserved for tests and programmatic use.

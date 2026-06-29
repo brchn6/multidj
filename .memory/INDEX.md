@@ -19,8 +19,8 @@ It documents progress, decisions, and context that would otherwise be lost betwe
 
 ## Quick Reference
 
-**Current branch:** `dev` (mirrored to `master`) — both pushed, identical at `cb3a775`
-**Test count:** 370 (2026-06-25, 0 failures)
+**Current branch:** `dev` (mirrored to `master`) — last pushed `cb3a775`; local HEAD `f566594` (bracket stripping + CLI cleanup)
+**Test count:** 373 (2026-06-29, 0 failures)
 **All phases complete as of 2026-06-25**
 
 **Entry points:**

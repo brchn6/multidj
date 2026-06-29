@@ -117,9 +117,9 @@ multidj analyze mixxx-blobs --apply     # write BeatGrid + KeyMap BLOBs back to 
 `multidj pipeline` chains **19 steps across 4 phases**, in order:
 
 ```
-Phase 1 INGEST   import → dedupe → fix_mismatches → parse
+Phase 1 INGEST   import → dedupe → clean_text → fix_mismatches → parse
 Phase 2 ANALYZE  mixxx_import → bpm → key → mixxx_blobs → energy → embed → cues
-Phase 3 ENRICH   clean_text → enrich_meta → enrich_genre → clean_genres
+Phase 3 ENRICH   enrich_meta → enrich_genre → clean_genres
 Phase 4 SYNC     cluster → crates → sync → report
 ```
 
@@ -134,9 +134,9 @@ already processed, so it's safe to re-run daily. It takes a single backup at the
 ### Run a single phase
 
 ```bash
-multidj pipeline --apply --phase ingest    # only import/dedupe/fix_mismatches/parse
+multidj pipeline --apply --phase ingest    # only import/dedupe/clean_text/fix_mismatches/parse
 multidj pipeline --apply --phase analyze   # only mixxx_import/bpm/key/mixxx_blobs/energy/embed/cues
-multidj pipeline --apply --phase enrich    # only clean_text/enrich_meta/enrich_genre/clean_genres
+multidj pipeline --apply --phase enrich    # only enrich_meta/enrich_genre/clean_genres
 multidj pipeline --apply --phase sync      # only cluster/crates/sync/report
 ```
 
@@ -145,8 +145,9 @@ multidj pipeline --apply --phase sync      # only cluster/crates/sync/report
 ```bash
 multidj pipeline --apply --skip-sync   # rebuild crates without touching Mixxx
 
-# Skip any individual step: --skip-import, --skip-bpm, --skip-key, --skip-cues,
-# --skip-embed, --skip-cluster, --skip-enrich, --skip-enrich-genre, --skip-genres, etc.
+# Skip optional steps: --skip-import, --skip-bpm, --skip-key, --skip-energy,
+# --skip-cues, --skip-embed, --skip-cluster, --skip-enrich, --skip-enrich-genre,
+# --skip-crates, --skip-sync, --skip-mixxx-blobs, --skip-report
 
 # Write report to custom path
 multidj pipeline --apply --report-output /path/to/report.html
@@ -188,38 +189,11 @@ multidj report dashboard --output /path/to/report.html
 
 ### Report-only run
 
-If you want to generate only the HTML report (without running import/analyze/clean/crates/sync),
-skip all pipeline processing steps and keep the report step enabled:
+Use the standalone command to generate the HTML report without touching anything else:
 
 ```bash
-multidj pipeline \
-    --skip-import \
-    --skip-fix-mismatches \
-    --skip-parse \
-    --skip-bpm \
-    --skip-key \
-    --skip-energy \
-    --skip-genres \
-    --skip-clean-text \
-    --skip-crates \
-    --skip-sync
-```
-
-Custom output path:
-
-```bash
-multidj pipeline \
-    --skip-import \
-    --skip-fix-mismatches \
-    --skip-parse \
-    --skip-bpm \
-    --skip-key \
-    --skip-energy \
-    --skip-genres \
-    --skip-clean-text \
-    --skip-crates \
-    --skip-sync \
-    --report-output /path/to/report.html
+multidj report dashboard
+multidj report dashboard --output /path/to/report.html
 ```
 
 On first run, MultiDJ will ask for your music directory and save it to `~/.multidj/config.toml`.
