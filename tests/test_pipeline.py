@@ -371,9 +371,9 @@ def test_phase_ingest_skips_analyze_enrich_sync(multidj_db, mixxx_db, cfg, tmp_p
         phase="ingest",
         report_output=str(tmp_path / "r.html"),
     )
-    ingest = {"import", "dedupe", "fix_mismatches", "parse"}
+    ingest = {"import", "dedupe", "clean_text", "fix_mismatches", "parse"}
     non_ingest = {"mixxx_import", "bpm", "key", "mixxx_blobs", "energy", "embed", "cues",
-                  "clean_text", "enrich_meta", "enrich_genre", "clean_genres",
+                  "enrich_meta", "enrich_genre", "clean_genres",
                   "cluster", "crates", "sync", "report"}
     for name in ingest:
         s = next(s for s in result["steps"] if s["step"] == name)

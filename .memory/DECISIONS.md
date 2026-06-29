@@ -345,6 +345,16 @@ Tracking the source makes it possible to understand confidence and re-enrich sel
 
 ---
 
+## 2026-06-29 — Universal bracket stripping in clean_text; moved to Phase 1 INGEST
+
+**Decision:** `clean_title_noise()` now strips ALL content inside `()`, `[]`, and `{}` from any position in the title (and artist) string — not just trailing groups matching a noise-marker allowlist. `clean_text` moved from Phase 3 ENRICH to Phase 1 INGEST (after dedupe, before fix_mismatches → parse).
+
+**Why:** The end goal is Mixxx showing clean track names. Titles carried label names, channel names, featured artist markers, and mix version tags in brackets. The old selective approach missed most of them. Universal stripping followed by `sync mixxx` pushes clean title/artist values to Mixxx's `library` table (`push_track()` writes these fields). Moving to Phase 1 means every downstream step (parse, BPM, etc.) works on clean strings.
+
+**Consequence:** `(Remix)`, `(feat. X)`, `(Original Mix)`, `[Label]`, `{Channel}` — all stripped from title and artist. Unbracketed noise phrases (e.g. `"- Official Audio"`) are still caught by `_TRAILING_NOISE_PHRASE_RE`. New regex: `_ANY_BRACKET_GROUP_RE = re.compile(r"\s*[\(\[\{][^\)\]\}]*[\)\]\}]")`.
+
+---
+
 ## Summary of Key Constants
 
 | Constant | Value | Established |

@@ -16,9 +16,9 @@ from .parse import parse_library
 
 
 PHASES: dict[str, set[str]] = {
-    "ingest":  {"import", "dedupe", "fix_mismatches", "parse"},
+    "ingest":  {"import", "dedupe", "clean_text", "fix_mismatches", "parse"},
     "analyze": {"mixxx_import", "bpm", "key", "mixxx_blobs", "energy", "embed", "cues"},
-    "enrich":  {"clean_text", "enrich_meta", "enrich_genre", "clean_genres"},
+    "enrich":  {"enrich_meta", "enrich_genre", "clean_genres"},
     "sync":    {"cluster", "crates", "sync", "report"},
 }
 
@@ -44,9 +44,9 @@ def run_pipeline(
 ) -> dict[str, Any]:
     """Run the MultiDJ pipeline in four phases: ingest → analyze → enrich → sync.
 
-    Phase 1 INGEST:   import, dedupe, fix_mismatches, parse
+    Phase 1 INGEST:   import, dedupe, clean_text, fix_mismatches, parse
     Phase 2 ANALYZE:  mixxx_import, bpm, key, mixxx_blobs, energy, embed, cues
-    Phase 3 ENRICH:   clean_text, enrich_meta, enrich_genre, clean_genres
+    Phase 3 ENRICH:   enrich_meta, enrich_genre, clean_genres
     Phase 4 SYNC:     cluster, crates, sync, report
 
     Pass phase='ingest'|'analyze'|'enrich'|'sync' to run a single phase.
@@ -123,6 +123,11 @@ def run_pipeline(
     ))
 
     steps.append(_run_step(
+        "clean_text", clean_text,
+        db_path=db_path, apply=apply, backup=False, limit=limit,
+    ))
+
+    steps.append(_run_step(
         "fix_mismatches", fix_mismatches,
         db_path=db_path, apply=apply, backup=False, limit=limit,
     ))
@@ -194,11 +199,6 @@ def run_pipeline(
     ))
 
     # ── Phase 3: ENRICH ───────────────────────────────────────────────────────
-
-    steps.append(_run_step(
-        "clean_text", clean_text,
-        db_path=db_path, apply=apply, backup=False, limit=limit,
-    ))
 
     from .config import get_enrich_config as _gec
     _enrich_cfg = _gec(cfg)

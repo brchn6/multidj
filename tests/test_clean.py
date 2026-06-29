@@ -123,7 +123,7 @@ def test_clean_text_aggressive_removes_known_video_noise(multidj_db, multidj_db_
     assert row3["title"] == "Song Name"
 
 
-def test_clean_text_aggressive_preserves_meaningful_descriptors(multidj_db, multidj_db_conn):
+def test_clean_text_strips_all_paren_content(multidj_db, multidj_db_conn):
     _insert_text_track(multidj_db_conn, 106, "Song Name (feat. Artist)")
     _insert_text_track(multidj_db_conn, 107, "Song Name (Remix)")
     _insert_text_track(multidj_db_conn, 108, "Song Name (Extended Mix)")
@@ -133,9 +133,9 @@ def test_clean_text_aggressive_preserves_meaningful_descriptors(multidj_db, mult
     row1 = multidj_db_conn.execute("SELECT title FROM tracks WHERE id=106").fetchone()
     row2 = multidj_db_conn.execute("SELECT title FROM tracks WHERE id=107").fetchone()
     row3 = multidj_db_conn.execute("SELECT title FROM tracks WHERE id=108").fetchone()
-    assert row1["title"] == "Song Name (feat. Artist)"
-    assert row2["title"] == "Song Name (Remix)"
-    assert row3["title"] == "Song Name (Extended Mix)"
+    assert row1["title"] == "Song Name"
+    assert row2["title"] == "Song Name"
+    assert row3["title"] == "Song Name"
 
 
 def test_clean_text_aggressive_whitespace_still_works(multidj_db, multidj_db_conn):
@@ -304,3 +304,24 @@ def test_clean_genres_nulls_symbol_only(multidj_db, multidj_db_conn):
     clean_genres(str(multidj_db), apply=True, backup=False)
     row = multidj_db_conn.execute("SELECT genre FROM tracks WHERE id = ?", (track_id,)).fetchone()
     assert row["genre"] is None
+
+
+def test_clean_text_strips_non_trailing_brackets(multidj_db, multidj_db_conn):
+    _insert_text_track(multidj_db_conn, 200, "Track Name [Label] (Original Mix)")
+    clean_text(str(multidj_db), apply=True, backup=False)
+    row = multidj_db_conn.execute("SELECT title FROM tracks WHERE id=200").fetchone()
+    assert row["title"] == "Track Name"
+
+
+def test_clean_text_strips_multiple_mixed_bracket_types(multidj_db, multidj_db_conn):
+    _insert_text_track(multidj_db_conn, 201, "Track {Channel} [Label] (DJ Name)")
+    clean_text(str(multidj_db), apply=True, backup=False)
+    row = multidj_db_conn.execute("SELECT title FROM tracks WHERE id=201").fetchone()
+    assert row["title"] == "Track"
+
+
+def test_clean_text_strips_artist_brackets(multidj_db, multidj_db_conn):
+    _insert_text_track(multidj_db_conn, 202, "Track Name", artist="Artist [Alias] (DJ Set)")
+    clean_text(str(multidj_db), apply=True, backup=False)
+    row = multidj_db_conn.execute("SELECT artist FROM tracks WHERE id=202").fetchone()
+    assert row["artist"] == "Artist"

@@ -23,6 +23,7 @@ _ACTIVE = "deleted = 0"
 _COLLAPSE_SPACES = re.compile(r"  +")
 _TRAILING_BRACKET_GROUP_RE = re.compile(r"\s*[\(\[\{]\s*([^\)\]\}]{1,120})\s*[\)\]\}]\s*$")
 _EMPTY_BRACKET_GROUP_RE = re.compile(r"\s*[\(\[\{]\s*[\)\]\}]\s*")
+_ANY_BRACKET_GROUP_RE = re.compile(r"\s*[\(\[\{][^\)\]\}]*[\)\]\}]")
 _TRAILING_NOISE_PHRASE_RE = re.compile(
     r"\s*(?:[-|:]\s*)?"
     r"(" 
@@ -155,15 +156,21 @@ def clean_artist_noise(artist: str) -> str:
     cleaned = _LEADING_ARTIST_00_RE.sub("", artist.strip())
     cleaned = _LEADING_ARTIST_NOISE_RE.sub("", cleaned)
     cleaned = _ARTIST_INLINE_NOISE_TOKEN_RE.sub("", cleaned)
-    cleaned = _EMPTY_BRACKET_GROUP_RE.sub(" ", cleaned)
+    cleaned = _ANY_BRACKET_GROUP_RE.sub("", cleaned)
     cleaned = _COLLAPSE_SPACES.sub(" ", cleaned).strip()
     cleaned = _LEADING_SEPARATOR_RE.sub("", cleaned).strip()
     return _clean_trailing_noise(cleaned)
 
 
 def clean_title_noise(title: str) -> str:
-    # Remove mapped promotional/download markers only from trailing title suffixes.
-    return _clean_trailing_noise(title)
+    cleaned = _ANY_BRACKET_GROUP_RE.sub("", title.strip())
+    cleaned = _COLLAPSE_SPACES.sub(" ", cleaned).strip()
+    cleaned = _TRAILING_NOISE_PHRASE_RE.sub("", cleaned)
+    cleaned = _COLLAPSE_SPACES.sub(" ", cleaned).strip()
+    cleaned = _TRAILING_SEPARATOR_RE.sub("", cleaned).strip()
+    if _SYMBOL_ONLY_RE.match(cleaned or ""):
+        return ""
+    return cleaned
 
 
 def _append_null_changes(
