@@ -121,7 +121,8 @@ multidj analyze mixxx-blobs --apply     # write BeatGrid + KeyMap BLOBs back to 
 
 ```
 Phase 1 INGEST   import → dedupe → clean_text → fix_mismatches → parse
-Phase 2 ANALYZE  mixxx_import → bpm → key → energy → embed → cues
+Phase 2 ANALYZE  mixxx_import → bpm → key → energy          (fast — no heavy models)
+Phase deep       embed → cues                                (slow — run at night)
 Phase 3 ENRICH   enrich_meta → enrich_genre → clean_genres
 Phase 4 SYNC     cluster → crates → sync → mixxx_blobs → report
 
@@ -140,9 +141,10 @@ already processed, so it's safe to re-run daily. It takes a single backup at the
 ### Run a single phase
 
 ```bash
-multidj pipeline --apply --phase quick     # everyday: import + pull Mixxx BPMs + sync (no librosa)
+multidj pipeline --apply --phase quick     # everyday: import + BPMs from Mixxx + sync
+multidj pipeline --apply --phase analyze   # BPM/key/energy detection (fast, no GPU)
+multidj pipeline --apply --phase deep      # embeddings + cues (slow — run at night)
 multidj pipeline --apply --phase ingest    # only import/dedupe/clean_text/fix_mismatches/parse
-multidj pipeline --apply --phase analyze   # only mixxx_import/bpm/key/energy/embed/cues
 multidj pipeline --apply --phase enrich    # only enrich_meta/enrich_genre/clean_genres
 multidj pipeline --apply --phase sync      # only cluster/crates/sync/mixxx_blobs/report
 ```

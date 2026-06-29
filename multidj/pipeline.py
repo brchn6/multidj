@@ -17,7 +17,8 @@ from .parse import parse_library
 
 PHASES: dict[str, set[str]] = {
     "ingest":  {"import", "dedupe", "clean_text", "fix_mismatches", "parse"},
-    "analyze": {"mixxx_import", "bpm", "key", "energy", "embed", "cues"},
+    "analyze": {"mixxx_import", "bpm", "key", "energy"},
+    "deep":    {"embed", "cues"},
     "enrich":  {"enrich_meta", "enrich_genre", "clean_genres"},
     "sync":    {"cluster", "crates", "sync", "mixxx_blobs", "report"},
     "quick":   {"import", "dedupe", "clean_text", "fix_mismatches", "parse",
@@ -47,13 +48,15 @@ def run_pipeline(
     """Run the MultiDJ pipeline in four phases: ingest → analyze → enrich → sync.
 
     Phase 1 INGEST:   import, dedupe, clean_text, fix_mismatches, parse
-    Phase 2 ANALYZE:  mixxx_import, bpm, key, energy, embed, cues
+    Phase 2 ANALYZE:  mixxx_import, bpm, key, energy  (fast — no heavy models)
+    Phase deep:       embed, cues                      (slow — run at night)
     Phase 3 ENRICH:   enrich_meta, enrich_genre, clean_genres
     Phase 4 SYNC:     cluster, crates, sync, mixxx_blobs, report
     Phase quick:      import, dedupe, clean_text, fix_mismatches, parse, mixxx_import, crates, sync, mixxx_blobs, report
 
-    Pass phase='ingest'|'analyze'|'enrich'|'sync'|'quick' to run a single phase.
+    Pass phase='ingest'|'analyze'|'deep'|'enrich'|'sync'|'quick' to run a single phase.
     Use 'quick' for the everyday workflow: import new files, clean names, sync to Mixxx.
+    Use 'deep' to run embeddings + cue detection (heavy models — schedule at night).
     mixxx_blobs runs after sync so new tracks are already in Mixxx when BeatGrid BLOBs are written.
     """
     cfg = cfg or {}

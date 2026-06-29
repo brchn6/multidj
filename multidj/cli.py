@@ -436,10 +436,10 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Cap number of tracks processed per step")
     p_pipeline.add_argument(
         "--phase",
-        choices=["ingest", "analyze", "enrich", "sync", "quick"],
+        choices=["ingest", "analyze", "deep", "enrich", "sync", "quick"],
         default=None,
         dest="phase",
-        help="Run only the specified pipeline phase. 'quick' = import+clean+dedupe+sync (no analysis)",
+        help="Run only the specified phase. 'quick'=daily sync, 'analyze'=BPM/key/energy (fast), 'deep'=embed+cues (slow, run at night)",
     )
 
     # ── report ───────────────────────────────────────────────────────────────

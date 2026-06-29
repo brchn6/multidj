@@ -406,6 +406,44 @@ def test_phase_quick_runs_ingest_and_sync_skips_analyze_enrich_cluster(multidj_d
         assert s["status"] == "skipped", f"{name} should be skipped in quick phase"
 
 
+def test_phase_deep_runs_only_embed_and_cues(multidj_db, cfg, tmp_path):
+    """--phase deep runs only embed + cues; everything else skipped."""
+    result = run_pipeline(
+        db_path=str(multidj_db),
+        cfg=cfg,
+        apply=False,
+        phase="deep",
+        report_output=str(tmp_path / "r.html"),
+    )
+    deep_steps = {"embed", "cues"}
+    non_deep = {"import", "dedupe", "clean_text", "fix_mismatches", "parse",
+                "mixxx_import", "bpm", "key", "mixxx_blobs", "energy",
+                "enrich_meta", "enrich_genre", "clean_genres",
+                "cluster", "crates", "sync", "report"}
+    for name in deep_steps:
+        s = next(s for s in result["steps"] if s["step"] == name)
+        assert s["status"] != "skipped", f"{name} should run in deep phase"
+    for name in non_deep:
+        s = next(s for s in result["steps"] if s["step"] == name)
+        assert s["status"] == "skipped", f"{name} should be skipped in deep phase"
+
+
+def test_phase_analyze_skips_embed_and_cues(multidj_db, mixxx_db, cfg, tmp_path):
+    """--phase analyze does NOT run embed or cues (those are in --phase deep)."""
+    result = run_pipeline(
+        db_path=str(multidj_db),
+        mixxx_db_path=str(mixxx_db),
+        cfg=cfg,
+        apply=False,
+        music_dir=str(tmp_path),
+        phase="analyze",
+        report_output=str(tmp_path / "r.html"),
+    )
+    for name in ("embed", "cues"):
+        s = next(s for s in result["steps"] if s["step"] == name)
+        assert s["status"] == "skipped", f"{name} must be skipped in analyze phase"
+
+
 def test_phase_invalid_name_skips_everything(multidj_db, cfg, tmp_path):
     """Unknown phase name results in all steps being skipped."""
     result = run_pipeline(
