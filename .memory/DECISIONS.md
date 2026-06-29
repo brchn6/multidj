@@ -355,6 +355,31 @@ Tracking the source makes it possible to understand confidence and re-enrich sel
 
 ---
 
+## 2026-06-29 — Pipeline restructure: mixxx_blobs to Phase 4; mixxx_import in quick; deep phase
+
+**Decision 1 — mixxx_blobs moved to Phase 4 SYNC (after sync):**
+Previously ran in Phase 2 ANALYZE, before `sync` added new tracks to Mixxx. New directory-imported tracks were silently skipped. Now runs after `sync` so tracks exist in Mixxx before BeatGrid BLOBs are written.
+
+**Decision 2 — mixxx_import added to quick phase:**
+Mixxx is the source of truth for BPM. Adding `mixxx_import` to `quick` means every daily run pulls Mixxx's detected BPMs into MultiDJ before generating BLOBs for gaps.
+
+**Decision 3 — embed and cues split into `--phase deep`:**
+`--phase analyze` is now fast (mixxx_import, bpm, key, energy — no GPU models). `--phase deep` runs embed+cues at night. Full `pipeline --apply` (no --phase flag) still runs everything in order.
+
+**Why:** These three decisions together close the stable-BPM loop: Mixxx detects → MultiDJ imports → librosa fills gaps → BeatGrid BLOBs written back to Mixxx.
+
+**Result as of 2026-06-29:** Mixxx 3,969/3,969 tracks have BeatGrid BLOBs (100%); 0 active dirty tracks.
+
+---
+
+## 2026-06-29 — DirectoryAdapter db path bug fixed
+
+**Decision:** `import_all()` now calls `resolve_db_path()` at entry rather than wrapping `multidj_db_path` in `str()`. `str(None)` = `"None"` was silently creating a ghost SQLite file called `./None` in the working directory. Every `import directory` call since the feature was built was writing to the wrong database.
+
+**Why it matters:** This was the root cause of thousands of tracks appearing to be imported but never appearing in the real library.
+
+---
+
 ## Summary of Key Constants
 
 | Constant | Value | Established |

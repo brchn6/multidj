@@ -466,10 +466,10 @@ wiring all deleted. User uses Mixxx custom keyboard shortcuts for audition. Do n
 | — | MCP server | Not started |
 | — | Rekordbox / Serato adapters | Not started |
 
-**Test count:** 373 (2026-06-29, 0 failures)
-**Branch:** `dev` — local HEAD `f566594` (not yet pushed); `master`/`origin/dev` at `cb3a775`
-**DB:** `~/.multidj/library.sqlite` → real: Dropbox path via `[mixxx].path` in config.toml
-**Real library:** ~3489 active tracks, ~1674 with CLAP embeddings
+**Test count:** 375 (2026-06-29 end-of-session, 0 failures)
+**Branch:** `dev` — 8 commits ahead of last push (`cb3a775`)
+**DB:** Dropbox path via `[mixxx].path` in config.toml
+**Real library:** 4,135 active tracks, 3,986 with BPM, 3,969 in Mixxx all with BeatGrid BLOBs
 
 ---
 
@@ -489,3 +489,14 @@ wiring all deleted. User uses Mixxx custom keyboard shortcuts for audition. Do n
 - Note: `--skip-dedupe` never existed; dedupe was already always-on.
 - README "report-only run" section simplified to just `multidj report dashboard`.
 - Underlying Python `skip=` API in `run_pipeline()` preserved for tests and programmatic use.
+
+**BPM pipeline fixes (2026-06-29 continued):**
+- Fixed critical bug: `DirectoryAdapter.import_all()` was writing to `./None` (ghost DB) instead of the real library — every directory import since the feature was built wrote to the wrong DB
+- `mixxx_blobs` moved from Phase 2 ANALYZE to Phase 4 SYNC (after `sync`) — new tracks now get BeatGrid-2.0 BLOBs after sync adds them to Mixxx
+- `mixxx_import` added to `quick` phase — Mixxx's detected BPMs pulled on every daily run
+- `--phase deep` added for embed+cues (slow GPU models, run at night)
+- `--phase analyze` now fast: mixxx_import, bpm, key, energy only (no models)
+- Caught up 3,161 BPMs from Mixxx into MultiDJ
+- End state: Mixxx 3,969/3,969 tracks have BeatGrid BLOBs (100%), 0 active dirty tracks
+
+**Test count:** 375 (2026-06-29, 0 failures)

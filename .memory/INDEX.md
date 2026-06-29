@@ -19,9 +19,9 @@ It documents progress, decisions, and context that would otherwise be lost betwe
 
 ## Quick Reference
 
-**Current branch:** `dev` (mirrored to `master`) — last pushed `cb3a775`; local HEAD `f566594` (bracket stripping + CLI cleanup)
-**Test count:** 373 (2026-06-29, 0 failures)
-**All phases complete as of 2026-06-25**
+**Current branch:** `dev` — 8 commits ahead of origin (`cb3a775`); local HEAD `6630a29`
+**Test count:** 375 (2026-06-29, 0 failures)
+**All phases complete as of 2026-06-29**
 
 **Entry points:**
 ```bash
@@ -45,7 +45,7 @@ multidj pipeline --apply   # 4 phases / 19 steps; all paths from config
 |---|---|
 | `cli.py` | argparse entry point, all subcommands |
 | `db.py` | SQLite connection, migration runner |
-| `pipeline.py` | 4-phase / 19-step orchestrator (`--phase ingest\|analyze\|enrich\|sync`) |
+| `pipeline.py` | Pipeline orchestrator (`--phase ingest\|analyze\|deep\|enrich\|sync\|quick`) |
 | `embed.py` | CLAP/CLaMP3 audio embeddings |
 | `embed_clamp3.py` | CLaMP3 backend (MERT → 768-dim) |
 | `cluster.py` | UMAP + HDBSCAN → Vibe/ crates |
