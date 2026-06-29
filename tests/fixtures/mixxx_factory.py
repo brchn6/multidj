@@ -14,9 +14,11 @@ from tests.fixtures.data import CRATE_TRACKS, CRATES, KEYS, TRACK_KEY_IDS, TRACK
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS track_locations (
-    id       INTEGER PRIMARY KEY,
-    location TEXT UNIQUE NOT NULL,
-    filesize INTEGER,
+    id        INTEGER PRIMARY KEY,
+    location  TEXT UNIQUE NOT NULL,
+    filename  TEXT,
+    directory TEXT,
+    filesize  INTEGER,
     fs_deleted INTEGER DEFAULT 1
 );
 
@@ -41,6 +43,9 @@ CREATE TABLE IF NOT EXISTS library (
     remixer             TEXT,
     mixxx_deleted       INTEGER DEFAULT 0,
     location            INTEGER,
+    header_parsed       INTEGER DEFAULT 0,
+    filetype            TEXT,
+    coverart_location   TEXT,
     beats               BLOB,
     beats_version       TEXT,
     beats_sub_version   TEXT,

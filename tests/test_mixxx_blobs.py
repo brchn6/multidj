@@ -90,6 +90,77 @@ class TestPackBeatgrid:
             )
 
 
+def test_new_track_gets_blob_only_after_sync(tmp_path, multidj_db, mixxx_db):
+    """Regression test: new tracks (dir-imported, not yet in Mixxx) only get a
+    BeatGrid-2.0 BLOB once sync has pushed them to Mixxx first.
+
+    This is the bug fixed by moving mixxx_blobs to Phase 4 (after sync):
+      1. mixxx_blobs before sync → no BLOB (track not in Mixxx yet)
+      2. sync → track in Mixxx with raw BPM float, beats=NULL
+      3. mixxx_blobs after sync → BeatGrid-2.0 BLOB written ✓
+    """
+    import sqlite3
+    from multidj.adapters.mixxx import MixxxAdapter
+    from multidj.mixxx_blobs import analyze_mixxx_blobs
+
+    NEW_PATH = str(tmp_path / "new_dir_import_track.mp3")
+    NEW_BPM = 128.0
+
+    # Insert the new track into MultiDJ (simulates directory import — NOT in Mixxx yet)
+    mdj = sqlite3.connect(str(multidj_db))
+    mdj.execute(
+        "INSERT INTO tracks (path, artist, title, bpm, duration, filesize, deleted)"
+        " VALUES (?, 'New Artist', 'New Track', ?, 240.0, 1000000, 0)",
+        (NEW_PATH, NEW_BPM),
+    )
+    track_id = mdj.execute("SELECT id FROM tracks WHERE path=?", (NEW_PATH,)).fetchone()[0]
+    mdj.execute(
+        "INSERT INTO sync_state (track_id, adapter, dirty) VALUES (?, 'mixxx', 1)",
+        (track_id,),
+    )
+    mdj.commit()
+    mdj.close()
+
+    def _mixxx_row():
+        conn = sqlite3.connect(str(mixxx_db))
+        row = conn.execute(
+            "SELECT l.bpm, l.beats, l.beats_version"
+            " FROM library l JOIN track_locations tl ON l.location = tl.id"
+            " WHERE tl.location = ?",
+            (NEW_PATH,),
+        ).fetchone()
+        conn.close()
+        return row
+
+    # ── Step 1: mixxx_blobs BEFORE sync → track not in Mixxx, BLOB not written ──
+    analyze_mixxx_blobs(
+        multidj_db_path=str(multidj_db),
+        mixxx_db_path=str(mixxx_db),
+        apply=True,
+    )
+    assert _mixxx_row() is None, "Track must not be in Mixxx before sync"
+
+    # ── Step 2: sync → track added to Mixxx with raw BPM, beats=NULL ─────────
+    MixxxAdapter(mixxx_db_path=str(mixxx_db)).full_sync(
+        multidj_db_path=str(multidj_db), apply=True
+    )
+    row = _mixxx_row()
+    assert row is not None, "Track must be in Mixxx after sync"
+    assert row[0] == NEW_BPM, f"Expected BPM {NEW_BPM}, got {row[0]}"
+    assert row[1] is None, "beats BLOB must be NULL immediately after sync"
+
+    # ── Step 3: mixxx_blobs AFTER sync → BeatGrid-2.0 BLOB written ───────────
+    analyze_mixxx_blobs(
+        multidj_db_path=str(multidj_db),
+        mixxx_db_path=str(mixxx_db),
+        apply=True,
+    )
+    row = _mixxx_row()
+    assert row[1] is not None, "BeatGrid BLOB must be written when mixxx_blobs runs after sync"
+    assert row[1][0] == 0x0A, "BLOB must start with 0x0A (BeatGrid-2.0 protobuf header)"
+    assert row[2] == "BeatGrid-2.0", f"beats_version must be 'BeatGrid-2.0', got {row[2]}"
+
+
 def test_mixxx_blobs_logs_skipped_for_existing_beats(multidj_db, mixxx_db, tmp_path):
     """analyze_mixxx_blobs logs SKIPPED when Mixxx already has a BeatGrid."""
     import sqlite3
