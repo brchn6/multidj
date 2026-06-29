@@ -17,11 +17,11 @@ from .parse import parse_library
 
 PHASES: dict[str, set[str]] = {
     "ingest":  {"import", "dedupe", "clean_text", "fix_mismatches", "parse"},
-    "analyze": {"mixxx_import", "bpm", "key", "mixxx_blobs", "energy", "embed", "cues"},
+    "analyze": {"mixxx_import", "bpm", "key", "energy", "embed", "cues"},
     "enrich":  {"enrich_meta", "enrich_genre", "clean_genres"},
-    "sync":    {"cluster", "crates", "sync", "report"},
+    "sync":    {"cluster", "crates", "sync", "mixxx_blobs", "report"},
     "quick":   {"import", "dedupe", "clean_text", "fix_mismatches", "parse",
-                 "crates", "sync", "report"},
+                 "crates", "sync", "mixxx_blobs", "report"},
 }
 
 _ALL_STEPS: set[str] = set().union(*PHASES.values())
@@ -47,13 +47,14 @@ def run_pipeline(
     """Run the MultiDJ pipeline in four phases: ingest → analyze → enrich → sync.
 
     Phase 1 INGEST:   import, dedupe, clean_text, fix_mismatches, parse
-    Phase 2 ANALYZE:  mixxx_import, bpm, key, mixxx_blobs, energy, embed, cues
+    Phase 2 ANALYZE:  mixxx_import, bpm, key, energy, embed, cues
     Phase 3 ENRICH:   enrich_meta, enrich_genre, clean_genres
-    Phase 4 SYNC:     cluster, crates, sync, report
-    Phase quick:      import, dedupe, clean_text, fix_mismatches, parse, crates, sync, report
+    Phase 4 SYNC:     cluster, crates, sync, mixxx_blobs, report
+    Phase quick:      import, dedupe, clean_text, fix_mismatches, parse, crates, sync, mixxx_blobs, report
 
     Pass phase='ingest'|'analyze'|'enrich'|'sync'|'quick' to run a single phase.
     Use 'quick' for the everyday workflow: import new files, clean names, sync to Mixxx.
+    mixxx_blobs runs after sync so new tracks are already in Mixxx when BeatGrid BLOBs are written.
     """
     cfg = cfg or {}
     skip = set(skip or set())
@@ -159,16 +160,6 @@ def run_pipeline(
         db_path=db_path, apply=apply, limit=limit,
     ))
 
-    if mixxx_db_path:
-        from .mixxx_blobs import analyze_mixxx_blobs as _amb
-        steps.append(_run_step(
-            "mixxx_blobs", _amb,
-            multidj_db_path=db_path, mixxx_db_path=mixxx_db_path,
-            apply=apply, backup_dir=False, limit=limit, write_beats=True,
-        ))
-    else:
-        steps.append({"step": "mixxx_blobs", "status": "skipped", "reason": "mixxx_db_path not set"})
-
     steps.append(_run_step(
         "energy", analyze_energy,
         db_path=db_path, apply=apply, backup_dir=False, limit=limit,
@@ -251,6 +242,16 @@ def run_pipeline(
         ))
     else:
         steps.append({"step": "sync", "status": "skipped", "reason": "mixxx_db_path not set"})
+
+    if mixxx_db_path:
+        from .mixxx_blobs import analyze_mixxx_blobs as _amb
+        steps.append(_run_step(
+            "mixxx_blobs", _amb,
+            multidj_db_path=db_path, mixxx_db_path=mixxx_db_path,
+            apply=apply, backup_dir=False, limit=limit, write_beats=True,
+        ))
+    else:
+        steps.append({"step": "mixxx_blobs", "status": "skipped", "reason": "mixxx_db_path not set"})
 
     def _report_step() -> dict[str, Any]:
         from .report import write_html_report
