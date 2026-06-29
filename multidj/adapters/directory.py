@@ -71,12 +71,14 @@ class DirectoryAdapter(SyncAdapter):
 
     def import_all(
         self,
-        multidj_db_path: Path,
+        multidj_db_path: Path | str | None = None,
         apply: bool = False,
         paths: list[str] | None = None,
         backup_dir: str | None = None,
         limit: int | None = None,
     ) -> dict[str, Any]:
+        from ..db import resolve_db_path
+        multidj_db_path = resolve_db_path(str(multidj_db_path) if multidj_db_path is not None else None)
         paths = paths or []
         audio_files = _walk_audio_files(paths)
         if limit is not None:
@@ -89,8 +91,8 @@ class DirectoryAdapter(SyncAdapter):
                 "sample": audio_files[:5],
             }
 
-        if backup_dir is not False and Path(str(multidj_db_path)).exists():
-            create_backup(str(multidj_db_path), backup_dir=backup_dir)
+        if backup_dir is not False and Path(multidj_db_path).exists():
+            create_backup(multidj_db_path, backup_dir=backup_dir)
 
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         new_tracks = 0
@@ -99,7 +101,7 @@ class DirectoryAdapter(SyncAdapter):
         auto_swapped_artist_title = 0
         errors: list[dict] = []
 
-        with connect(str(multidj_db_path), readonly=False) as conn:
+        with connect(multidj_db_path, readonly=False) as conn:
             for filepath in audio_files:
                 try:
                     tags = _read_tags(filepath)
@@ -207,7 +209,7 @@ class DirectoryAdapter(SyncAdapter):
             # Auto-deduplicate tracks with identical artist+title
             from ..dedupe import dedupe as _dedupe
             dedup_result = _dedupe(
-                db_path=str(multidj_db_path),
+                db_path=multidj_db_path,
                 by="artist-title",
                 apply=True,
                 backup=False,
