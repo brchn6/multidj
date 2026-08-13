@@ -295,7 +295,7 @@ training data.
 
 - Stop pushing `bpm` and `key` fields to Mixxx `library` table (Mixxx manages those
   itself via its own analysis engine; writing them caused conflicts)
-- `sync mixxx`: after sync, copy DB to local `~/.mixxx/mixxxdb.sqlite` from Dropbox
+- `sync mixxx`: use the Dropbox Mixxx DB as the canonical path; `~/.mixxx/mixxxdb.sqlite` is a symlink to `/home/barc/Weizmann Institute Dropbox/Bar Cohen/Music/.mixxx/mixxxdb.sqlite`
 
 ---
 
@@ -500,3 +500,20 @@ wiring all deleted. User uses Mixxx custom keyboard shortcuts for audition. Do n
 - End state: Mixxx 3,969/3,969 tracks have BeatGrid BLOBs (100%), 0 active dirty tracks
 
 **Test count:** 375 (2026-06-29, 0 failures)
+
+
+---
+
+## 2026-08-12 - Erin_gig genre re-tag TODO (tomorrow)
+
+Plan: `docs/erin-gig-genre-retag.md` - write Spotify genres from the Exportify CSVs into the gig files' ID3 tags (mutagen in this venv), re-import, re-sync. All 255 Erin_gig tracks currently carry YouTube category genres (Music/Entertainment) because yt-dlp wrote them; the CSVs have the real genres.
+
+---
+
+## Session recap - 2026-08-12 - Bulletproof choreography + Erin_gig (full picture lives in ~/.memory/progress.md)
+
+- **mixxx-safe choreography** (in ~/.local/bin, NOT this repo): self-healing symlink `~/.mixxx/mixxxdb.sqlite` -> Dropbox DB, `Music/.mixxx/dj.lock` (one Mixxx session at a time), wait-sync-idle, `dropbox stop/start` via CLI (the old systemd unit is dead/disabled), safety backups, verify log `~/.mixxx/dj-session.log`.
+- **Gig toolchain** (in ~/.pi/agent/skills/dj-sync/scripts/): `dj-fetch.sh` (CSV -> fetch -> dedupe -> import -> playlist -> verify), `dj-dedupe.py`, `dj-playlist.py` (survivor matching via this DB when import dedupe keeps existing copies).
+- **Erin_gig done**: MultiDJ 4,404 / Mixxx 4,229 / playlist 255 tracks. 3 tracks failed (yt-dlp 403/age).
+- **Genre gap** (the reason files show "Music"): yt-dlp writes YouTube's category; the Exportify CSVs carry the real Spotify genres. Fix plan: `docs/erin-gig-genre-retag.md`.
+- **Spotify direct-fetch verdict**: cb auth works; Spotify 403s the playlist-tracks endpoint for cb's embedded client; ~30-line embed fallback in cb/spotify.py would kill Exportify for public playlists (deferred).
